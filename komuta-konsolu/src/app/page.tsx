@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/hooks/use-chat-hook';
 import ReactMarkdown from 'react-markdown';
 
@@ -12,6 +12,14 @@ interface AIModel {
   name: string;
   provider: AIProvider;
   tier?: 'flagship' | 'balanced' | 'fast' | 'legacy';
+}
+
+interface UploadedFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string;
 }
 
 const AI_MODELS: AIModel[] = [
@@ -39,27 +47,27 @@ const AI_MODELS: AIModel[] = [
   { id: 'gemini-1.0-pro', name: 'Gemini 1.0 Pro', provider: 'gemini', tier: 'balanced' },
 ];
 
-// Tier renkleri
-const TIER_COLORS = {
-  flagship: '#ff6b6b', // Kırmızı - En güçlü
-  balanced: '#4ecdc4', // Teal - Dengeli
-  fast: '#45b7d1',     // Mavi - Hızlı
-  legacy: '#96ceb4'    // Yeşil - Eski
-};
-
 // Tier simgeleri
 const TIER_ICONS = {
   flagship: '🚀',
   balanced: '⚖️',
   fast: '⚡',
-  legacy: '🔒'
+  legacy: '📦'
 };
 
+// Suggestion örnekleri
+const SUGGESTIONS = [
+  "Python'da makine öğrenmesi projesi nasıl başlarım?",
+  "React Native ile mobil uygulama geliştirme",
+  "SQL veritabanı optimizasyon teknikleri",
+  "Web güvenliği en iyi uygulamaları"
+];
+
 // Basit UI Bileşenleri
-const Button = ({ children, variant = 'default', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'active' }) => (
+const Button = ({ children, variant = 'default', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'active' | 'secondary' }) => (
   <button 
     {...props} 
-    className={`btn ${variant === 'active' ? 'btn-active' : ''}`}
+    className={`btn ${variant === 'active' ? 'btn-active' : variant === 'secondary' ? 'btn-secondary' : ''}`}
   >
     {children}
   </button>
@@ -69,11 +77,38 @@ const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} className="input-field" />
 );
 
+const TextArea = (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
+  <textarea {...props} className="input-field" />
+);
+
 const Select = ({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) => (
   <select {...props} className="select-field">
     {children}
   </select>
 );
+
+// Tema Hook
+const useTheme = () => {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+    
+    setTheme(initialTheme);
+    document.documentElement.setAttribute('data-theme', initialTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+  };
+
+  return { theme, toggleTheme };
+};
 
 // Terminal Kod Bloğu Bileşeni
 const CodeBlock = ({ children, language = '' }: { children: string, language?: string }) => {
@@ -107,10 +142,8 @@ const CodeBlock = ({ children, language = '' }: { children: string, language?: s
   return (
     <div className="code-block">
       <div className="code-header">
-        <div className="code-info">
-          <span className="language-tag">
-            {getLanguageIcon(language)} {language.toLowerCase() || 'kod'}
-          </span>
+        <div className="language-tag">
+          {getLanguageIcon(language)} {language.toLowerCase() || 'kod'}
         </div>
         <button
           onClick={copyToClipboard}
@@ -123,6 +156,119 @@ const CodeBlock = ({ children, language = '' }: { children: string, language?: s
         <code>{children}</code>
       </pre>
     </div>
+  );
+};
+
+// Dosya yükleme bileşeni
+const FileUpload = ({ onFileUpload, uploadedFiles, onRemoveFile }: {
+  onFileUpload: (files: UploadedFile[]) => void;
+  uploadedFiles: UploadedFile[];
+  onRemoveFile: (fileId: string) => void;
+}) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFileSelect = async (files: FileList | null) => {
+    if (!files) return;
+
+    const newFiles: UploadedFile[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        alert(`Dosya çok büyük: ${file.name}. Maksimum 10MB desteklenir.`);
+        continue;
+      }
+
+      const reader = new FileReader();
+      const fileData = await new Promise<string>((resolve) => {
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      newFiles.push({
+        id: Math.random().toString(36).substr(2, 9),
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: fileData
+      });
+    }
+
+    onFileUpload(newFiles);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFileSelect(e.dataTransfer.files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getFileIcon = (type: string) => {
+    if (type.startsWith('image/')) return '🖼️';
+    if (type.startsWith('text/')) return '📄';
+    if (type.includes('pdf')) return '📕';
+    if (type.includes('word')) return '📘';
+    if (type.includes('excel') || type.includes('spreadsheet')) return '📊';
+    return '📎';
+  };
+
+  return (
+    <>
+      {uploadedFiles.length > 0 && (
+        <div className="uploaded-files">
+          {uploadedFiles.map((file) => (
+            <div key={file.id} className="uploaded-file">
+              {getFileIcon(file.type)} {file.name} ({formatFileSize(file.size)})
+              <button
+                onClick={() => onRemoveFile(file.id)}
+                className="remove-file"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      <div
+        className={`file-drop-zone ${dragOver ? 'drag-over' : ''}`}
+        onClick={() => fileInputRef.current?.click()}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+      >
+        📎 Dosya yüklemek için tıklayın veya buraya sürükleyin
+      </div>
+      
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        onChange={(e) => handleFileSelect(e.target.files)}
+        style={{ display: 'none' }}
+        accept="image/*,text/*,.pdf,.doc,.docx,.xls,.xlsx,.json"
+      />
+    </>
   );
 };
 
@@ -159,7 +305,7 @@ const MarkdownMessage = ({ content, isUser }: { content: string, isUser: boolean
         p: ({ children }) => {
           const content = String(children);
           
-          // JSON benzeri içerik algıla (düzeltilmiş regex)
+          // JSON benzeri içerik algıla
           const isJSONLike = content.trim().match(/^\s*[\[{].*[\]}]\s*$/) && 
                             (content.includes('"') || content.includes(':'));
           
@@ -194,6 +340,11 @@ export default function ChatPage() {
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>('claude');
   const [selectedModel, setSelectedModel] = useState('claude-3-5-sonnet-20241022');
   const [showSettings, setShowSettings] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [showFileUpload, setShowFileUpload] = useState(false);
+  
+  const { theme, toggleTheme } = useTheme();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { messages, isLoading, error, sendMessage, resetChat } = useChat({
     model: selectedModel,
@@ -217,8 +368,33 @@ export default function ChatPage() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
-    sendMessage(inputValue);
+    
+    // Dosyalar ile beraber mesaj gönder
+    sendMessage(inputValue, uploadedFiles);
     setInputValue('');
+    setUploadedFiles([]);
+    setShowFileUpload(false);
+  };
+
+  const handleSuggestionClick = (suggestion: string) => {
+    setInputValue(suggestion);
+    textareaRef.current?.focus();
+  };
+
+  const handleFileUpload = (newFiles: UploadedFile[]) => {
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const handleRemoveFile = (fileId: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  // Auto-resize textarea
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+    const textarea = e.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
   };
 
   // Aktif modelin bilgilerini al
@@ -226,22 +402,54 @@ export default function ChatPage() {
 
   return (
     <div className="chat-app">
+      {/* Header */}
+      <div className="chat-header">
+        <h1 className="chat-title">AI Komuta Konsolu</h1>
+        <button onClick={toggleTheme} className="theme-toggle">
+          {theme === 'light' ? '🌙' : '☀️'}
+          {theme === 'light' ? 'Koyu' : 'Açık'}
+        </button>
+      </div>
+
       {/* Ana Chat Alanı */}
       <div className="chat-main">
-        {/* Chat Container */}
+        {/* Messages Container */}
         <div className="messages-container">
           {messages.length === 0 && (
             <div className="empty-state">
-              <div className="empty-icon">💭</div>
-              <p className="empty-text">Sohbet geçmişi boş.</p>
-              <p className="empty-subtitle">Aktif: <strong>{activeModel?.name}</strong></p>
+              <div className="empty-icon">🤖</div>
+              <p className="empty-text">AI Asistanınıza Hoş Geldiniz!</p>
+              <p className="empty-subtitle">
+                Aktif Model: <strong>{activeModel?.name}</strong> 
+                {activeModel?.tier && (
+                  <span className="tier-badge">
+                    {TIER_ICONS[activeModel.tier]} {activeModel.tier.toUpperCase()}
+                  </span>
+                )}
+              </p>
+              
+              <div className="empty-suggestions">
+                {SUGGESTIONS.map((suggestion, index) => (
+                  <div 
+                    key={index}
+                    className="suggestion-card"
+                    onClick={() => handleSuggestionClick(suggestion)}
+                  >
+                    {suggestion}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
+          
           {messages.map((msg) => (
             <div key={msg.id} className={`message ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}>
               <div className="message-header">
                 <span className="message-author">
-                  {msg.role === 'user' ? '👤 Komutan' : `🤖 Sistem (${selectedProvider.toUpperCase()})`}
+                  {msg.role === 'user' ? '👤 Siz' : `🤖 ${selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)}`}
+                </span>
+                <span className="message-time">
+                  {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
               <div className="message-content">
@@ -249,10 +457,11 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
+          
           {isLoading && (
             <div className="loading-message">
               <div className="loading-icon">🤖</div>
-              <div className="loading-text">Sistem düşünüyor</div>
+              <div className="loading-text">AI Düşünüyor...</div>
               <div className="loading-dots">
                 <div className="loading-dot"></div>
                 <div className="loading-dot"></div>
@@ -263,6 +472,7 @@ export default function ChatPage() {
               </div>
             </div>
           )}
+          
           {error && (
             <div className="error-message">
               ⚠️ <strong>HATA:</strong> {error}
@@ -272,17 +482,60 @@ export default function ChatPage() {
 
         {/* Input Alanı */}
         <div className="input-container">
-          <form onSubmit={handleSubmit} className="input-form">
-            <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={`${activeModel?.name} sistemine mesajınızı yazın...`}
-              disabled={isLoading}
-            />
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? '⏳' : '📤'}
-            </Button>
-          </form>
+          <div className="input-wrapper">
+            <form onSubmit={handleSubmit} className="input-form">
+              {/* Dosya yükleme alanı */}
+              {showFileUpload && (
+                <FileUpload 
+                  onFileUpload={handleFileUpload}
+                  uploadedFiles={uploadedFiles}
+                  onRemoveFile={handleRemoveFile}
+                />
+              )}
+              
+              {/* Aksiyonlar */}
+              <div className="input-actions">
+                <button
+                  type="button"
+                  onClick={() => setShowFileUpload(!showFileUpload)}
+                  className="file-upload-btn"
+                >
+                  📎 Dosya Ekle
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFileUpload(!showFileUpload)}
+                  className="file-upload-btn"
+                >
+                  🖼️ Görsel Ekle
+                </button>
+              </div>
+
+              {/* Ana input */}
+              <div className="input-main">
+                <TextArea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={handleInputChange}
+                  placeholder={`${activeModel?.name} ile sohbet edin...`}
+                  disabled={isLoading}
+                  rows={1}
+                  style={{ resize: 'none' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!isLoading && inputValue.trim()) {
+                        handleSubmit(e as any);
+                      }
+                    }
+                  }}
+                />
+                <Button type="submit" disabled={isLoading || !inputValue.trim()}>
+                  {isLoading ? '⏳' : '📤'}
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
 
@@ -291,7 +544,7 @@ export default function ChatPage() {
         {showSettings && (
           <div className="settings-content">
             <div className="settings-header">
-              <h3>🤖 AI Sistemi Seçici</h3>
+              <h3>🤖 AI Ayarları</h3>
               <button 
                 onClick={() => setShowSettings(false)}
                 className="close-btn"
@@ -302,7 +555,7 @@ export default function ChatPage() {
             
             {/* Provider Seçici */}
             <div className="setting-group">
-              <label className="setting-label">Sistem:</label>
+              <label className="setting-label">AI Sağlayıcısı:</label>
               <div className="provider-buttons">
                 <Button 
                   variant={selectedProvider === 'claude' ? 'active' : 'default'}
@@ -354,7 +607,7 @@ export default function ChatPage() {
                   ))}
                 </optgroup>
                 {availableModels.some(m => m.tier === 'legacy') && (
-                  <optgroup label="🔒 Legacy (Eski)">
+                  <optgroup label="📦 Legacy (Eski)">
                     {availableModels.filter(m => m.tier === 'legacy').map(model => (
                       <option key={model.id} value={model.id}>
                         {TIER_ICONS[model.tier || 'legacy']} {model.name}
@@ -368,7 +621,7 @@ export default function ChatPage() {
             {/* Aktif Model Bilgisi */}
             {activeModel && (
               <div className={`model-status status-${activeModel.tier || 'balanced'}`}>
-                <strong>Aktif:</strong> {TIER_ICONS[activeModel.tier || 'balanced']} {selectedProvider.toUpperCase()} - {activeModel.name} 
+                <strong>Aktif Model:</strong> {TIER_ICONS[activeModel.tier || 'balanced']} {selectedProvider.toUpperCase()} - {activeModel.name}
                 <span className="tier-badge">
                   [{activeModel.tier?.toUpperCase() || 'BALANCED'}]
                 </span>
@@ -376,8 +629,11 @@ export default function ChatPage() {
             )}
 
             <div className="settings-actions">
-              <Button onClick={resetChat} disabled={isLoading}>
+              <Button onClick={resetChat} disabled={isLoading} variant="secondary">
                 🗑️ Sıfırla
+              </Button>
+              <Button onClick={toggleTheme} variant="secondary">
+                {theme === 'light' ? '🌙' : '☀️'} Tema
               </Button>
             </div>
           </div>
