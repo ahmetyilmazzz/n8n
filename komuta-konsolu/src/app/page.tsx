@@ -402,43 +402,43 @@ export default function ChatPage() {
 
   return (
     <div className="chat-app">
-      {/* Header */}
-      <div className="chat-header">
-        <h1 className="chat-title">AI Komuta Konsolu</h1>
-        <button onClick={toggleTheme} className="theme-toggle">
-          {theme === 'light' ? '🌙' : '☀️'}
-          {theme === 'light' ? 'Koyu' : 'Açık'}
-        </button>
-      </div>
-
       {/* Ana Chat Alanı */}
       <div className="chat-main">
+        {/* Sağ üst köşede tema ve ayarlar */}
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 200,
+          display: 'flex',
+          gap: '8px'
+        }}>
+          <button onClick={toggleTheme} className="theme-toggle">
+            {theme === 'light' ? '🌙' : '☀️'}
+          </button>
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            className="settings-toggle"
+            title="AI Ayarları"
+            style={{ position: 'static' }}
+          >
+            ⚙️
+          </button>
+        </div>
+
         {/* Messages Container */}
         <div className="messages-container">
           {messages.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">🤖</div>
-              <p className="empty-text">AI Asistanınıza Hoş Geldiniz!</p>
-              <p className="empty-subtitle">
-                Aktif Model: <strong>{activeModel?.name}</strong> 
-                {activeModel?.tier && (
-                  <span className="tier-badge">
-                    {TIER_ICONS[activeModel.tier]} {activeModel.tier.toUpperCase()}
-                  </span>
-                )}
-              </p>
-              
-              <div className="empty-suggestions">
-                {SUGGESTIONS.map((suggestion, index) => (
-                  <div 
-                    key={index}
-                    className="suggestion-card"
-                    onClick={() => handleSuggestionClick(suggestion)}
-                  >
-                    {suggestion}
-                  </div>
-                ))}
-              </div>
+            <div className="empty-suggestions">
+              {SUGGESTIONS.map((suggestion, index) => (
+                <div 
+                  key={index}
+                  className="suggestion-card"
+                  onClick={() => handleSuggestionClick(suggestion)}
+                >
+                  {suggestion}
+                </div>
+              ))}
             </div>
           )}
           
@@ -492,27 +492,17 @@ export default function ChatPage() {
                   onRemoveFile={handleRemoveFile}
                 />
               )}
-              
-              {/* Aksiyonlar */}
-              <div className="input-actions">
-                <button
-                  type="button"
-                  onClick={() => setShowFileUpload(!showFileUpload)}
-                  className="file-upload-btn"
-                >
-                  📎 Dosya Ekle
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowFileUpload(!showFileUpload)}
-                  className="file-upload-btn"
-                >
-                  🖼️ Görsel Ekle
-                </button>
-              </div>
 
               {/* Ana input */}
               <div className="input-main">
+                <button
+                  type="button"
+                  onClick={() => setShowFileUpload(!showFileUpload)}
+                  className="attachment-btn"
+                  title="Dosya veya görsel ekle"
+                >
+                  📎
+                </button>
                 <TextArea
                   ref={textareaRef}
                   value={inputValue}
@@ -540,7 +530,12 @@ export default function ChatPage() {
       </div>
 
       {/* Sağ Alt Ayarlar Paneli */}
-      <div className={`settings-panel ${showSettings ? 'settings-open' : ''}`}>
+      <div className={`settings-panel ${showSettings ? 'settings-open' : ''}`} style={{
+        position: 'fixed',
+        top: '70px',
+        right: '20px',
+        zIndex: 200
+      }}>
         {showSettings && (
           <div className="settings-content">
             <div className="settings-header">
@@ -638,15 +633,6 @@ export default function ChatPage() {
             </div>
           </div>
         )}
-        
-        {/* Ayarlar Butonu */}
-        <button 
-          onClick={() => setShowSettings(!showSettings)}
-          className="settings-toggle"
-          title="AI Ayarları"
-        >
-          ⚙️
-        </button>
       </div>
     </div>
   );
