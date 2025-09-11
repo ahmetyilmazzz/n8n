@@ -1,173 +1,320 @@
 // app/api/ai-gateway/route.ts
-// Ã‡oklu AI destekli n8n webhook proxy'si
+// Geliştirilmiş Multi-AI Gateway - Tamamen Düzeltilmiş Versiyon
 
 export const dynamic = 'force-dynamic';
 
-// AI Provider belirleme fonksiyonu
-function detectAIProvider(model: string): string {
-  if (model.includes('claude')) return 'claude';
-  if (model.includes('gpt')) return 'chatgpt';
-  if (model.includes('gemini')) return 'gemini';
-  return 'claude'; // varsayÄ±lan
+// Model validasyon listeleri - Tip güvenli
+const VALID_MODELS: Record<string, string[]> = {
+  claude: [
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022', 
+    'claude-3-opus-20240229',
+    'claude-3-sonnet-20240229',
+    'claude-3-haiku-20240307'
+  ],
+  openai: [
+    'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-turbo-preview',
+    'gpt-4', 'gpt-3.5-turbo', 'gpt-3.5-turbo-16k',
+    'o1-preview', 'o1-mini',
+    'dall-e-3', 'dall-e-2'
+  ],
+  google: [
+    'gemini-1.5-pro', 'gemini-1.5-pro-exp-0827',
+    'gemini-1.5-flash', 'gemini-1.5-flash-8b',
+    'gemini-1.0-pro'
+  ],
+  // Yeni AI araçları buraya eklenebilir:
+  // perplexity: ['pplx-7b-online', 'pplx-70b-online'],
+  // anthropic: ['claude-instant-v1', 'claude-v1'],
+  // cohere: ['command-r', 'command-r-plus']
+};
+
+// Model fallback haritası
+const MODEL_FALLBACKS: Record<string, string> = {
+  // Beta/Gelecek modeller -> mevcut modeller
+  'gpt-5': 'gpt-4o',
+  'gpt-5-mini': 'gpt-4o-mini',
+  'o3': 'o1-preview',
+  'o3-pro': 'o1-preview',
+  'o4-mini': 'o1-mini',
+  'claude-sonnet-4-20250514': 'claude-3-5-sonnet-20241022',
+  'claude-opus-4': 'claude-3-opus-20240229',
+  'gemini-2.5-pro': 'gemini-1.5-pro',
+  'gemini-2.5-flash': 'gemini-1.5-flash',
+  'veo-3': 'gemini-1.5-pro',
+  // Yeni fallback'ler buraya eklenebilir
+};
+
+// Desteklenen provider tipleri
+type AIProvider = 'claude' | 'openai' | 'google';
+
+// Provider tespit fonksiyonu - Case insensitive
+function detectAIProvider(model: string): AIProvider {
+  if (!model || typeof model !== 'string') {
+    return 'claude'; // Varsayılan
+  }
+  
+  const modelLower = model.toLowerCase();
+  
+  if (modelLower.includes('claude')) return 'claude';
+  if (modelLower.includes('gpt') || modelLower.includes('o1') || 
+      modelLower.includes('o3') || modelLower.includes('o4') || 
+      modelLower.includes('dall-e')) return 'openai';
+  if (modelLower.includes('gemini') || modelLower.includes('veo')) return 'google';
+  
+  // Yeni provider'lar buraya eklenebilir:
+  // if (modelLower.includes('pplx')) return 'perplexity';
+  // if (modelLower.includes('command')) return 'cohere';
+  
+  return 'claude'; // Varsayılan
 }
 
-export async function POST(req: Request) {
-  console.log('ðŸš€ Multi-AI Proxy: Ä°stek alÄ±ndÄ±');
+// Model validasyon ve fallback fonksiyonu
+function validateAndMapModel(model: string): { 
+  model: string; 
+  provider: AIProvider; 
+  isFallback: boolean 
+} {
+  // Boş model kontrolü
+  if (!model || typeof model !== 'string' || model.trim() === '') {
+    console.warn('⚠️ Model bilgisi eksik, varsayılan kullanılıyor');
+    return {
+      model: 'claude-3-5-sonnet-20241022',
+      provider: 'claude',
+      isFallback: true
+    };
+  }
+
+  const trimmedModel = model.trim();
+  const provider = detectAIProvider(trimmedModel);
+  
+  // Model fallback kontrolü
+  if (MODEL_FALLBACKS[trimmedModel]) {
+    const fallbackModel = MODEL_FALLBACKS[trimmedModel];
+    console.log(`🔄 Model fallback: ${trimmedModel} -> ${fallbackModel}`);
+    return {
+      model: fallbackModel,
+      provider: detectAIProvider(fallbackModel),
+      isFallback: true
+    };
+  }
+  
+  // Geçerli model listesi kontrolü - as any kaldırıldı
+  const validModels = VALID_MODELS[provider] || [];
+  if (validModels.includes(trimmedModel)) {
+    return { 
+      model: trimmedModel, 
+      provider, 
+      isFallback: false 
+    };
+  }
+  
+  // Geçersiz model için varsayılan fallback
+  const defaultFallbacks: Record<string, string> = {
+    claude: 'claude-3-5-sonnet-20241022',
+    openai: 'gpt-4o',
+    google: 'gemini-1.5-pro'
+  };
+  
+  const fallbackModel = defaultFallbacks[provider];
+  console.warn(`⚠️ Geçersiz model ${trimmedModel}, fallback: ${fallbackModel}`);
+  
+  return {
+    model: fallbackModel,
+    provider,
+    isFallback: true
+  };
+}
+
+// Error response helper - Merkezi hata yönetimi
+function createErrorResponse(
+  message: string, 
+  code: string, 
+  status: number = 500, 
+  additionalData: Record<string, any> = {}
+): Response {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: { 
+        message, 
+        code, 
+        status,
+        timestamp: new Date().toISOString(),
+        ...additionalData 
+      }
+    }),
+    { 
+      status, 
+      headers: { 
+        'content-type': 'application/json',
+        'x-gateway-error': 'true'
+      } 
+    }
+  );
+}
+
+// Ana POST handler
+export async function POST(req: Request): Promise<Response> {
+  console.log('🚀 Multi-AI Gateway: İstek alındı');
   
   try {
-    // Ä°stek gÃ¶vdesini al
-    let body;
+    // İstek gövdesini parse et
+    let body: any;
     try {
       body = await req.json();
-      console.log('ðŸ“¤ Proxy: GÃ¶nderilen veri:', JSON.stringify(body, null, 2));
+      console.log('📤 Gateway: Gönderilen veri:', JSON.stringify(body, null, 2));
     } catch (err) {
-      console.error('âŒ Proxy: Ä°stek gÃ¶vdesi JSON parse edilemedi:', err);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: { message: 'GeÃ§ersiz JSON formatÄ±', code: 'INVALID_JSON' }
-        }),
-        { 
-          status: 400, 
-          headers: { 'content-type': 'application/json' } 
-        }
+      console.error('❌ Gateway: İstek gövdesi JSON parse edilemedi:', err);
+      return createErrorResponse(
+        'Geçersiz JSON formatı', 
+        'INVALID_JSON', 
+        400
       );
     }
 
-    // AI provider'Ä± belirle
-    const aiProvider = detectAIProvider(body.model || '');
-    console.log(`ðŸ¤– Tespit edilen AI Provider: ${aiProvider} (Model: ${body.model})`);
+    // Model validasyon ve mapping
+    const { model: validatedModel, provider, isFallback } = validateAndMapModel(body.model);
+    
+    console.log(`🎯 Model Mapping: ${body.model || 'undefined'} -> ${validatedModel} (${provider})`);
+    if (isFallback) {
+      console.log(`🔄 Fallback kullanıldı: ${body.model} -> ${validatedModel}`);
+    }
 
-    // Body'ye provider bilgisini ekle (n8n switch iÃ§in)
+    // Enhanced body hazırla
     const enhancedBody = {
       ...body,
-      ai_provider: aiProvider,
-      timestamp: new Date().toISOString()
+      model: validatedModel,
+      provider: provider,
+      original_model: body.model || null,
+      is_fallback: isFallback,
+      timestamp: new Date().toISOString(),
+      // Dosya desteği için ek kontroller
+      files: Array.isArray(body.files) ? body.files : [],
+      conversation_history: Array.isArray(body.conversation_history) ? body.conversation_history : []
     };
 
-    console.log('ðŸ“¡ Proxy: n8n webhook\'una istek gÃ¶nderiliyor...');
-    console.log('ðŸ”„ Enhanced Body:', JSON.stringify(enhancedBody, null, 2));
+    console.log('📡 Gateway: n8n webhook\'una istek gönderiliyor...');
 
-    const n8nResponse = await fetch('http://localhost:5678/webhook/ai-gateway', {
-      method: 'POST',
-      headers: { 
-        'content-type': 'application/json',
-        'user-agent': 'komuta-konsolu-multi-ai-proxy/1.0',
-        'x-ai-provider': aiProvider // Header olarak da gÃ¶nder
-      },
-      body: JSON.stringify(enhancedBody),
-      signal: AbortSignal.timeout(45000) // 45 saniye timeout (AI'lar iÃ§in daha uzun)
-    });
+    // n8n webhook URL'i
+    const webhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook/ai-gateway';
+    
+    // Modern AbortController ile timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye
+
+    let n8nResponse: Response;
+    try {
+      n8nResponse = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 
+          'content-type': 'application/json',
+          'user-agent': 'multi-ai-gateway/2.1',
+          'x-ai-provider': provider,
+          'x-original-model': body.model || 'unknown',
+          'x-validated-model': validatedModel,
+          'x-is-fallback': isFallback.toString()
+        },
+        body: JSON.stringify(enhancedBody),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const status = n8nResponse.status;
     const contentType = n8nResponse.headers.get('content-type') || '';
     
-    console.log(`ðŸ“‹ Proxy: n8n yanÄ±t durumu: ${status} ${n8nResponse.statusText}`);
-    console.log(`ðŸ“‹ Proxy: n8n content-type: ${contentType}`);
+    console.log(`📊 Gateway: n8n yanıt durumu: ${status} ${n8nResponse.statusText}`);
 
-    // YanÄ±t metnini al
+    // Yanıt metnini al
     let responseText: string;
     try {
       responseText = await n8nResponse.text();
-      console.log('ðŸ“¥ Proxy: n8n ham yanÄ±tÄ±:', responseText.substring(0, 500) + (responseText.length > 500 ? '...' : ''));
+      console.log('📥 Gateway: n8n ham yanıtı alındı, uzunluk:', responseText.length);
     } catch (err) {
-      console.error('âŒ Proxy: n8n yanÄ±tÄ± okunamadÄ±:', err);
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: { 
-            message: 'n8n yanÄ±tÄ± okunamadÄ±', 
-            code: 'READ_ERROR',
-            ai_provider: aiProvider
-          }
-        }),
-        { 
-          status: 502, 
-          headers: { 'content-type': 'application/json' } 
-        }
+      console.error('❌ Gateway: n8n yanıtı okunamadı:', err);
+      return createErrorResponse(
+        'n8n yanıtı okunamadı', 
+        'READ_ERROR', 
+        502,
+        { provider }
       );
     }
 
-    // BoÅŸ yanÄ±t kontrolÃ¼
+    // Boş yanıt kontrolü
     if (!responseText.trim()) {
-      console.warn('âš ï¸ Proxy: n8n boÅŸ yanÄ±t dÃ¶ndÃ¼');
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: { 
-            message: `${aiProvider.toUpperCase()} sisteminden boÅŸ yanÄ±t`, 
-            code: 'EMPTY_RESPONSE',
-            ai_provider: aiProvider
-          }
-        }),
-        { 
-          status: 502, 
-          headers: { 'content-type': 'application/json' } 
-        }
+      console.warn('⚠️ Gateway: n8n boş yanıt döndü');
+      return createErrorResponse(
+        `${provider.toUpperCase()} sisteminden boş yanıt`, 
+        'EMPTY_RESPONSE', 
+        502,
+        { provider }
       );
     }
 
-    // JSON yanÄ±t kontrolÃ¼ ve iÅŸleme
+    // JSON yanıt işleme
     if (contentType.includes('application/json')) {
       try {
         const jsonResponse = JSON.parse(responseText);
-        console.log(`âœ… Proxy: ${aiProvider.toUpperCase()} JSON yanÄ±tÄ± baÅŸarÄ±yla parse edildi`);
+        console.log(`✅ Gateway: ${provider.toUpperCase()} JSON yanıtı başarıyla parse edildi`);
         
-        // AI provider bilgisini yanÄ±ta ekle
-        if (jsonResponse.success && typeof jsonResponse === 'object') {
-          jsonResponse.ai_provider = aiProvider;
-          jsonResponse.model_used = body.model;
+        // Metadata ekle
+        if (jsonResponse && typeof jsonResponse === 'object' && jsonResponse !== null) {
+          jsonResponse.provider = provider;
+          jsonResponse.model_used = validatedModel;
+          jsonResponse.original_model = body.model || null;
+          jsonResponse.is_fallback = isFallback;
+          jsonResponse.response_time = new Date().toISOString();
         }
         
         return new Response(JSON.stringify(jsonResponse), {
           status,
           headers: { 
             'content-type': 'application/json',
-            'x-ai-provider': aiProvider
+            'x-ai-provider': provider,
+            'x-model-used': validatedModel,
+            'x-is-fallback': isFallback.toString()
           },
         });
       } catch (parseErr) {
-        console.error(`âŒ Proxy: ${aiProvider.toUpperCase()} JSON parse hatasÄ±:`, parseErr);
+        console.error(`❌ Gateway: ${provider.toUpperCase()} JSON parse hatası:`, parseErr);
         
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: { 
-              message: `${aiProvider.toUpperCase()} geÃ§ersiz JSON dÃ¶ndÃ¼`, 
-              code: 'INVALID_JSON_FROM_AI',
-              ai_provider: aiProvider,
-              details: responseText.substring(0, 200)
-            }
-          }),
+        return createErrorResponse(
+          `${provider.toUpperCase()} geçersiz JSON döndü`, 
+          'INVALID_JSON_FROM_AI', 
+          502,
           { 
-            status: 502, 
-            headers: { 'content-type': 'application/json' } 
+            provider, 
+            details: responseText.substring(0, 200) 
           }
         );
       }
     }
 
-    // JSON deÄŸilse dÃ¼z metin yanÄ±tÄ±
-    console.log(`ðŸ“„ Proxy: ${aiProvider.toUpperCase()} dÃ¼z metin yanÄ±tÄ±`);
+    // Düz metin yanıtı işleme
+    console.log(`📝 Gateway: ${provider.toUpperCase()} düz metin yanıtı`);
     const payload = n8nResponse.ok
       ? { 
           success: true, 
           content: responseText,
-          ai_provider: aiProvider,
-          model_used: body.model,
+          provider: provider,
+          model_used: validatedModel,
+          original_model: body.model || null,
+          is_fallback: isFallback,
           metadata: {
             contentType,
-            status
+            status,
+            response_time: new Date().toISOString()
           }
         }
       : {
           success: false,
           error: {
-            message: responseText || n8nResponse.statusText || `${aiProvider.toUpperCase()} error`,
+            message: responseText || n8nResponse.statusText || `${provider.toUpperCase()} error`,
             code: 'AI_ERROR',
             status,
-            contentType,
-            ai_provider: aiProvider,
+            provider: provider,
           },
         };
 
@@ -175,62 +322,50 @@ export async function POST(req: Request) {
       status: n8nResponse.ok ? 200 : status,
       headers: { 
         'content-type': 'application/json',
-        'x-ai-provider': aiProvider
+        'x-ai-provider': provider,
+        'x-model-used': validatedModel,
+        'x-is-fallback': isFallback.toString()
       },
     });
 
   } catch (err: any) {
-    console.error('ðŸ’¥ Proxy: Genel hata:', err);
+    console.error('💥 Gateway: Genel hata:', err);
     
-    // Timeout hatasÄ± kontrolÃ¼
-    if (err.name === 'TimeoutError') {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: { 
-            message: 'AI sistemi zaman aÅŸÄ±mÄ±na uÄŸradÄ± (45s)', 
-            code: 'TIMEOUT',
-            status: 504 
-          },
-        }),
-        { 
-          status: 504, 
-          headers: { 'content-type': 'application/json' } 
-        }
+    // AbortError (timeout) kontrolü
+    if (err.name === 'AbortError') {
+      return createErrorResponse(
+        'AI sistemi zaman aşımına uğradı (60s)', 
+        'TIMEOUT', 
+        504
       );
     }
 
-    // BaÄŸlantÄ± hatasÄ±
+    // Bağlantı hatası
     if (err.code === 'ECONNREFUSED') {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: { 
-            message: 'n8n servisine baÄŸlanÄ±lamÄ±yor (ECONNREFUSED)', 
-            code: 'CONNECTION_REFUSED',
-            status: 502 
-          },
-        }),
-        { 
-          status: 502, 
-          headers: { 'content-type': 'application/json' } 
-        }
+      return createErrorResponse(
+        'n8n servisine bağlanılamıyor. n8n çalışır durumda mı?', 
+        'CONNECTION_REFUSED', 
+        502
+      );
+    }
+
+    // Network hatası
+    if (err.code === 'ENOTFOUND') {
+      return createErrorResponse(
+        'n8n sunucusu bulunamadı. URL doğru mu?', 
+        'HOST_NOT_FOUND', 
+        502
       );
     }
 
     // Genel hata
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: { 
-          message: err?.message || 'Multi-AI Proxy hatasÄ±', 
-          code: 'PROXY_ERROR',
-          status: 502 
-        },
-      }),
+    return createErrorResponse(
+      err?.message || 'Multi-AI Gateway hatası', 
+      'GATEWAY_ERROR', 
+      502,
       { 
-        status: 502, 
-        headers: { 'content-type': 'application/json' } 
+        errorName: err?.name,
+        errorCode: err?.code 
       }
     );
   }

@@ -1,264 +1,245 @@
-import { useState, useCallback, useRef } from 'react';
+// hooks/use-chat-hook.ts
+// Çoklu AI destekli chat hook'u - DÜZELTİLMİŞ versiyon
 
-interface Message {
-  role: 'user' | 'assistant';
+'use client';
+
+import { useState } from 'react';
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
   content: string;
-  id?: string;
-  timestamp?: number;
-}
-
-interface ChatRequest {
-  model: string;
-  prompt: string;
-  conversation_history: Array<{ role: 'user' | 'assistant'; content: string }>;
-}
-
-interface ChatSuccessResponse {
-  success: true; 
-  role?: 'assistant';
-  content: string; 
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  requestId?: string;
-  rawResponse?: any; 
-}
-
-interface ChatErrorResponse {
-  success: false;
-  error: { message: string; code?: string };
-}
-
-type ChatResponse = ChatSuccessResponse | ChatErrorResponse;
-
-interface UseChatReturn {
-  messages: Message[];
-  isLoading: boolean;
-  error: string | null;
-  data: ChatSuccessResponse | null;
-  sendMessage: (prompt: string) => Promise<void>;
-  clearMessages: () => void;
-  clearError: () => void;
-  deleteMessage: (id: string) => void;
-  resetChat: () => void;
-}
-
-interface UseChatConfig {
+  timestamp: Date;
   model?: string;
-  apiUrl?: string;
-  timeout?: number;
-  maxRetries?: number;
-  onSuccess?: (r: ChatSuccessResponse) => void;
-  onError?: (m: string) => void;
+  provider?: string;
 }
 
-export function useChat(config: UseChatConfig = {}): UseChatReturn {
-  const {
-    model = 'claude-3-haiku-20240307',
-    apiUrl = '/api/ai-gateway',
-    timeout = 60_000, // 60 saniyeye Ã§Ä±karÄ±ldÄ±
-    maxRetries = 2,
-    onSuccess,
-    onError,
-  } = config;
+export interface UploadedFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string;
+}
 
-  const [messages, setMessages] = useState<Message[]>([]);
+interface UseChatOptions {
+  model: string;
+  onError?: (error: string) => void;
+  onSuccess?: () => void;
+}
+
+interface APIResponse {
+  success: boolean;
+  content?: string;
+  error?: {
+    message: string;
+    code: string;
+    details?: any;
+  };
+  provider?: string;
+  model_used?: string;
+}
+
+export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ChatSuccessResponse | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const retryCountRef = useRef(0);
-
-  const generateId = useCallback(
-    () => `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-    []
-  );
-
-  const fetchWithRetry = useCallback(
-    async (url: string, options: RequestInit, retriesLeft: number): Promise<Response> => {
-      try {
-        console.log(`ðŸš€ API Ã§aÄŸrÄ±sÄ± yapÄ±lÄ±yor: ${url}`, { retriesLeft });
-        const res = await fetch(url, options);
-        
-        console.log(`ðŸ“¡ YanÄ±t alÄ±ndÄ±: ${res.status} ${res.statusText}`);
-        
-        if (!res.ok && retriesLeft > 0) {
-          console.warn(`âš ï¸ BaÅŸarÄ±sÄ±z istek, yeniden deneniyor... (${retriesLeft} deneme kaldÄ±)`);
-          retryCountRef.current++;
-          await new Promise(r => setTimeout(r, 1000 * retryCountRef.current));
-          return fetchWithRetry(url, options, retriesLeft - 1);
-        }
-        return res;
-      } catch (err: any) {
-        console.error(`âŒ Fetch hatasÄ±:`, err);
-        if (retriesLeft > 0 && !(err instanceof DOMException && err.name === 'AbortError')) {
-          console.warn(`ðŸ”„ Yeniden deneniyor... (${retriesLeft} deneme kaldÄ±)`);
-          retryCountRef.current++;
-          await new Promise(r => setTimeout(r, 1000 * retryCountRef.current));
-          return fetchWithRetry(url, options, retriesLeft - 1);
-        }
-        throw err;
-      }
-    },
-    []
-  );
-
-  const sendMessage = useCallback(async (prompt: string) => {
-    if (!prompt.trim()) {
-      const m = 'Mesaj boÅŸ olamaz';
-      setError(m); 
-      onError?.(m); 
-      return;
-    }
-
-    // Ã–nceki isteÄŸi iptal et
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
-    retryCountRef.current = 0;
+  const sendMessage = async (prompt: string, files?: UploadedFile[]) => {
+    if (!prompt.trim()) return;
 
     setIsLoading(true);
     setError(null);
 
-    const userMessage: Message = { 
-      role: 'user', 
-      content: prompt, 
-      id: generateId(), 
-      timestamp: Date.now() 
+    // Kullanıcı mesajını ekle
+    const userMessage: ChatMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'user',
+      content: prompt,
+      timestamp: new Date(),
+      model,
     };
-    
+
     setMessages(prev => [...prev, userMessage]);
 
+    // Conversation history hazırla (son 20 mesaj)
+    const conversationHistory = messages
+      .slice(-20) // Daha fazla context için artırıldı
+      .map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+
     try {
-      const body: ChatRequest = {
+      // API request payload'u hazırla
+      const requestPayload = {
         model,
         prompt,
-        conversation_history: messages.map(({ role, content }) => ({ role, content })),
+        conversation_history: conversationHistory,
+        max_tokens: getMaxTokensForModel(model),
+        temperature: getTemperatureForModel(model),
+        files: files || []
       };
 
-      console.log('ðŸ“¤ GÃ¶nderilen veri:', JSON.stringify(body, null, 2));
+      console.log('🚀 API isteği gönderiliyor:', {
+        model,
+        provider: detectProvider(model),
+        historyLength: conversationHistory.length,
+        hasFiles: (files?.length || 0) > 0
+      });
 
-      const timeoutId = setTimeout(() => {
-        console.warn('â° Timeout gerÃ§ekleÅŸti');
-        abortControllerRef.current?.abort();
-      }, timeout);
-
-      const res = await fetchWithRetry(
-        apiUrl,
-        {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(body),
-          signal: abortControllerRef.current.signal,
+      // API çağrısı
+      const response = await fetch('/api/ai-gateway', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        maxRetries
-      );
+        body: JSON.stringify(requestPayload),
+      });
 
-      clearTimeout(timeoutId);
-
-      // YanÄ±tÄ± detaylÄ± ÅŸekilde iÅŸle
-      const contentType = res.headers.get('content-type') || '';
-      console.log(`ðŸ“‹ Content-Type: ${contentType}`);
-
-      let raw: string;
+      let data: APIResponse;
       try {
-        raw = await res.text();
-        console.log('ðŸ“¥ Ham yanÄ±t:', raw);
-      } catch (textErr) {
-        console.error('âŒ YanÄ±t metin olarak okunamadÄ±:', textErr);
-        throw new Error('YanÄ±t okunamadÄ±');
-      }
-
-      if (!raw.trim()) {
-        throw new Error('BoÅŸ yanÄ±t alÄ±ndÄ±');
-      }
-
-      let parsed: ChatResponse;
-      try {
-        parsed = JSON.parse(raw) as ChatResponse;
-        console.log('âœ… JSON parse edildi:', parsed);
+        data = await response.json();
       } catch (parseErr) {
-        console.error('âŒ JSON parse hatasÄ±:', parseErr);
-        console.error('ðŸ” Parse edilemeyen veri:', raw.substring(0, 200) + '...');
-        
-        // JSON parse edilemezse, hata mesajÄ± olarak gÃ¶ster
-        parsed = { 
-          success: false, 
-          error: { 
-            message: `GeÃ§ersiz yanÄ±t formatÄ±: ${raw.substring(0, 100)}...`,
-            code: 'PARSE_ERROR'
-          } 
-        };
+        throw new Error(`Sunucu yanıtı işlenemedi: ${response.status} ${response.statusText}`);
       }
 
-      if (parsed.success) {
-        const assistant: Message = {
-          role: 'assistant',
-          content: parsed.content,
-          id: generateId(),
-          timestamp: Date.now(),
-        };
-        
-        console.log('âœ… BaÅŸarÄ±lÄ± yanÄ±t alÄ±ndÄ±');
-        setMessages(prev => [...prev, assistant]);
-        setData(parsed);
-        onSuccess?.(parsed);
-      } else {
-        const errorMsg = parsed.error?.message || 'Bilinmeyen bir hata oluÅŸtu';
-        console.error('âŒ API hatasÄ±:', parsed.error);
-        setError(errorMsg);
-        onError?.(errorMsg);
+      console.log('📥 API yanıtı:', { 
+        success: data.success, 
+        hasContent: !!data.content,
+        error: data.error?.message,
+        provider: data.provider 
+      });
+
+      if (!response.ok) {
+        const errorMsg = data.error?.message || `HTTP ${response.status} Error`;
+        throw new Error(errorMsg);
       }
+
+      if (!data.success) {
+        const errorMsg = data.error?.message || 'API request failed';
+        throw new Error(errorMsg);
+      }
+
+      if (!data.content) {
+        throw new Error('API returned no content');
+      }
+
+      // AI yanıtını ekle
+      const assistantMessage: ChatMessage = {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content: data.content,
+        timestamp: new Date(),
+        model: data.model_used || model,
+        provider: data.provider || detectProvider(model),
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      onSuccess?.();
+
     } catch (err: any) {
-      console.error('ðŸ’¥ Genel hata:', err);
+      console.error('❌ Chat hook error:', err);
+      const errorMessage = err.message || 'Bilinmeyen hata oluştu';
       
-      const errorMessage = err?.name === 'AbortError'
-        ? (timeout ? 'Ä°stek zaman aÅŸÄ±mÄ±na uÄŸradÄ±' : 'Ä°stek iptal edildi')
-        : err?.message || 'Bir hata oluÅŸtu';
-        
       setError(errorMessage);
       onError?.(errorMessage);
+
+      // Hata mesajını chat'e ekle
+      const errorChatMessage: ChatMessage = {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content: `❌ **Hata:** ${errorMessage}`,
+        timestamp: new Date(),
+        model,
+      };
+
+      setMessages(prev => [...prev, errorChatMessage]);
     } finally {
       setIsLoading(false);
-      abortControllerRef.current = null;
     }
-  }, [messages, model, apiUrl, timeout, maxRetries, generateId, fetchWithRetry, onSuccess, onError]);
-
-  const clearMessages = useCallback(() => { 
-    setMessages([]); 
-    setData(null); 
-    setError(null);
-  }, []);
-  
-  const clearError = useCallback(() => setError(null), []);
-  
-  const deleteMessage = useCallback((id: string) => 
-    setMessages(prev => prev.filter(m => m.id !== id)), []
-  );
-  
-  const resetChat = useCallback(() => {
-    abortControllerRef.current?.abort();
-    setMessages([]); 
-    setIsLoading(false); 
-    setError(null); 
-    setData(null);
-    abortControllerRef.current = null; 
-    retryCountRef.current = 0;
-  }, []);
-
-  return { 
-    messages, 
-    isLoading, 
-    error, 
-    data, 
-    sendMessage, 
-    clearMessages, 
-    clearError, 
-    deleteMessage, 
-    resetChat 
   };
+
+  const resetChat = () => {
+    setMessages([]);
+    setError(null);
+  };
+
+  return {
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    resetChat,
+  };
+};
+
+// Yardımcı fonksiyonlar
+function detectProvider(model: string): string {
+  if (model.includes('claude')) return 'anthropic';
+  if (model.includes('gpt') || model.includes('o1') || model.includes('o3') || model.includes('o4')) return 'openai';
+  if (model.includes('gemini') || model.includes('veo')) return 'google';
+  return 'unknown';
+}
+
+function getMaxTokensForModel(model: string): number {
+  // Güncellenmiş ve gerçekçi token limitleri
+  const modelLimits: Record<string, number> = {
+    // OpenAI O-series
+    'o1-preview': 32768,
+    'o1-mini': 65536,
+    'o1-pro': 32768,
+    
+    // OpenAI GPT-4 series (gerçek limitler)
+    'gpt-4o': 4096,
+    'gpt-4o-mini': 4096,
+    'gpt-4-turbo': 4096,
+    'gpt-4': 4096,
+    'gpt-3.5-turbo': 4096,
+    
+    // Deneysel modeller (düşük limitler)
+    'gpt-5': 4096,
+    'gpt-5-mini': 4096,
+    'o3': 32000,
+    'o3-pro': 32000,
+    
+    // Claude series
+    'claude-3-5-sonnet-20241022': 4096,
+    'claude-3-5-haiku-20241022': 4096,
+    'claude-3-opus-20240229': 4096,
+    'claude-3-sonnet-20240229': 4096,
+    'claude-3-haiku-20240307': 4096,
+    'claude-sonnet-4-20250514': 8192,
+    'claude-opus-4': 8192,
+    
+    // Gemini series
+    'gemini-1.5-pro': 8192,
+    'gemini-1.5-flash': 8192,
+    'gemini-1.0-pro': 4096,
+    'gemini-2.5-pro': 8192,
+    'gemini-2.5-flash': 8192,
+  };
+
+  // Model-specific limit döndür
+  if (modelLimits[model]) {
+    return modelLimits[model];
+  }
+
+  // Provider-based fallback
+  if (model.includes('claude')) return 4096;
+  if (model.includes('gpt-4') || model.includes('o1')) return 4096;
+  if (model.includes('gpt-3.5')) return 4096;
+  if (model.includes('gemini')) return 8192;
+
+  return 4096; // varsayılan
+}
+
+function getTemperatureForModel(model: string): number {
+  // O-series modelleri sabit 1.0 temperature kullanır
+  if (model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4')) {
+    return 1.0;
+  }
+  
+  // Diğer modeller için varsayılan
+  return 0.7;
 }
