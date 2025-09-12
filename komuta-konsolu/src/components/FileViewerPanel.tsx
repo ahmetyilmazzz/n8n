@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// components/FileViewerPanel.tsx
+import React, { useState } from 'react';
 
 interface GeneratedFile {
   id: string;
@@ -15,29 +16,54 @@ interface FileViewerPanelProps {
   file: GeneratedFile | null;
 }
 
-export const FileViewerPanel: React.FC<FileViewerPanelProps> = ({ isOpen, onClose, file }) => {
+export const FileViewerPanel: React.FC<FileViewerPanelProps> = ({
+  isOpen,
+  onClose,
+  file
+}) => {
   const [copied, setCopied] = useState(false);
 
-  // Panel dışına tıklanınca kapat
-  useEffect(() => {
-    const handleEscKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
+  if (!isOpen || !file) return null;
 
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscKey);
-      document.body.style.overflow = 'hidden';
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(file.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Kopyalama hatası:', err);
     }
+  };
 
-    return () => {
-      document.removeEventListener('keydown', handleEscKey);
-      document.body.style.overflow = 'unset';
+  const downloadFile = () => {
+    const extensions = {
+      javascript: '.js',
+      typescript: '.ts',
+      python: '.py',
+      css: '.css',
+      html: '.html',
+      json: '.json',
+      txt: '.txt',
+      markdown: '.md',
+      xml: '.xml',
+      sql: '.sql',
+      yaml: '.yml'
     };
-  }, [isOpen, onClose]);
 
-  // Dosya türüne göre ikon döndür
+    const extension = extensions[file.type] || '.txt';
+    const fileName = file.name.includes('.') ? file.name : `${file.name}${extension}`;
+    
+    const blob = new Blob([file.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const getFileIcon = (type: string) => {
     const icons = {
       javascript: '⚡',
@@ -55,7 +81,6 @@ export const FileViewerPanel: React.FC<FileViewerPanelProps> = ({ isOpen, onClos
     return icons[type as keyof typeof icons] || '📄';
   };
 
-  // Dosya boyutunu formatla
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -64,177 +89,162 @@ export const FileViewerPanel: React.FC<FileViewerPanelProps> = ({ isOpen, onClos
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Dosya uzantısını al
-  const getFileExtension = (type: string) => {
-    const extensions = {
-      javascript: 'js',
-      typescript: 'ts',
-      python: 'py',
-      css: 'css',
-      html: 'html',
-      json: 'json',
-      txt: 'txt',
-      markdown: 'md',
-      xml: 'xml',
-      sql: 'sql',
-      yaml: 'yml'
-    };
-    return extensions[type as keyof typeof extensions] || 'txt';
-  };
-
-  // Dosyayı indir
-  const downloadFile = () => {
-    if (!file) return;
-
-    const extension = getFileExtension(file.type);
-    const fileName = file.name.endsWith(`.${extension}`) ? file.name : `${file.name}.${extension}`;
-    
-    const blob = new Blob([file.content], { 
-      type: getMimeType(file.type) 
-    });
-    
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  // MIME type al
-  const getMimeType = (type: string) => {
-    const mimeTypes = {
-      javascript: 'text/javascript',
-      typescript: 'text/typescript',
-      python: 'text/x-python',
-      css: 'text/css',
-      html: 'text/html',
-      json: 'application/json',
-      txt: 'text/plain',
-      markdown: 'text/markdown',
-      xml: 'application/xml',
-      sql: 'application/sql',
-      yaml: 'text/yaml'
-    };
-    return mimeTypes[type as keyof typeof mimeTypes] || 'text/plain';
-  };
-
-  // Kopyala
-  const copyToClipboard = async () => {
-    if (!file) return;
-    
-    try {
-      await navigator.clipboard.writeText(file.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Kopyalama hatası:', err);
-    }
-  };
-
-  if (!isOpen || !file) return null;
-
   return (
     <>
       {/* Overlay */}
       <div 
-        className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity duration-300"
+        className="file-viewer-overlay"
         onClick={onClose}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          zIndex: 1000,
+          backdropFilter: 'blur(4px)'
+        }}
       />
       
       {/* Panel */}
-      <div className={`
-        fixed top-0 right-0 h-full w-full max-w-2xl bg-white dark:bg-gray-900 
-        shadow-2xl z-50 transform transition-transform duration-300 ease-in-out
-        ${isOpen ? 'translate-x-0' : 'translate-x-full'}
-        border-l border-gray-200 dark:border-gray-700
-      `}>
+      <div 
+        className="file-viewer-panel"
+        style={{
+          position: 'fixed',
+          top: '5%',
+          right: '5%',
+          bottom: '5%',
+          width: '60%',
+          backgroundColor: 'var(--bg-primary)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          zIndex: 1001,
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)'
+        }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">{getFileIcon(file.type)}</span>
+        <div 
+          className="file-viewer-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border-color)',
+            backgroundColor: 'var(--bg-secondary)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>{getFileIcon(file.type)}</span>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              <h3 style={{ 
+                margin: 0, 
+                fontSize: '18px', 
+                fontWeight: '600',
+                color: 'var(--text-primary)' 
+              }}>
                 {file.name}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {formatFileSize(file.size)} • {file.type.toUpperCase()}
-              </p>
+              <div style={{ 
+                fontSize: '12px', 
+                color: 'var(--text-secondary)',
+                display: 'flex',
+                gap: '8px',
+                marginTop: '2px'
+              }}>
+                <span>{file.type.toUpperCase()}</span>
+                <span>•</span>
+                <span>{formatFileSize(file.size)}</span>
+                <span>•</span>
+                <span>{file.createdAt.toLocaleString('tr-TR')}</span>
+              </div>
             </div>
           </div>
           
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            aria-label="Paneli kapat"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          <button
-            onClick={downloadFile}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            İndir
-          </button>
-          
-          <button
-            onClick={copyToClipboard}
-            className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium
-              ${copied 
-                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' 
-                : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'
-              }
-            `}
-          >
-            {copied ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Kopyalandı
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Kopyala
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* File Content */}
-        <div className="flex-1 overflow-hidden">
-          <div className="h-full overflow-y-auto">
-            <pre className="p-6 text-sm leading-relaxed font-mono bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 h-full">
-              <code>{file.content}</code>
-            </pre>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={copyToClipboard}
+              style={{
+                padding: '8px 12px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {copied ? '✅ Kopyalandı' : '📋 Kopyala'}
+            </button>
+            
+            <button
+              onClick={downloadFile}
+              style={{
+                padding: '8px 12px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              💾 İndir
+            </button>
+            
+            <button
+              onClick={onClose}
+              style={{
+                padding: '8px 12px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: '16px'
+              }}
+            >
+              ✕
+            </button>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-            <span>
-              Oluşturulma: {file.createdAt.toLocaleString('tr-TR')}
-            </span>
-            <span>
-              {file.content.split('\n').length} satır
-            </span>
-          </div>
+        {/* Content */}
+        <div 
+          className="file-viewer-content"
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          <pre 
+            style={{
+              flex: 1,
+              margin: 0,
+              padding: '20px',
+              overflow: 'auto',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              fontSize: '14px',
+              lineHeight: '1.5',
+              fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word'
+            }}
+          >
+            <code>{file.content}</code>
+          </pre>
         </div>
       </div>
     </>

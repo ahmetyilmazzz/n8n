@@ -1,5 +1,5 @@
 // hooks/use-chat-hook.ts
-// Çoklu AI destekli chat hook'u - DÜZELTİLMİŞ versiyon
+// Çoklu AI destekli chat hook'u - DOSYA DESTEĞİ EKLENMİŞ
 
 'use client';
 
@@ -12,6 +12,7 @@ export interface ChatMessage {
   timestamp: Date;
   model?: string;
   provider?: string;
+  attachments?: UploadedFile[]; // Dosya ekleri için
 }
 
 export interface UploadedFile {
@@ -19,7 +20,8 @@ export interface UploadedFile {
   name: string;
   type: string;
   size: number;
-  data: string;
+  data: string; // Base64 encoded content
+  mimeType: string; // MIME type
 }
 
 interface UseChatOptions {
@@ -44,12 +46,84 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const sendMessage = async (prompt: string, files?: UploadedFile[]) => {
-    if (!prompt.trim()) return;
+  // Dosya yükleme fonksiyonu
+  const uploadFile = async (file: File): Promise<UploadedFile> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onload = () => {
+        const base64Data = reader.result as string;
+        // "data:mime/type;base64," kısmını kaldır
+        const cleanBase64 = base64Data.split(',')[1];
+        
+        const uploadedFile: UploadedFile = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: file.name,
+          type: getFileTypeFromExtension(file.name),
+          size: file.size,
+          data: cleanBase64,
+          mimeType: file.type || 'application/octet-stream'
+        };
+        
+        resolve(uploadedFile);
+      };
+      
+      reader.onerror = () => {
+        reject(new Error(`Dosya okunamadı: ${file.name}`));
+      };
+      
+      // Dosyayı base64 olarak oku
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Dosya ekle
+  const addFiles = async (files: FileList) => {
+    const newFiles: UploadedFile[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Dosya boyutu kontrolü (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
+        onError?.(`Dosya çok büyük: ${file.name} (Max: 10MB)`);
+        continue;
+      }
+      
+      try {
+        const uploadedFile = await uploadFile(file);
+        newFiles.push(uploadedFile);
+        console.log(`✅ Dosya yüklendi: ${file.name} (${file.size} bytes)`);
+      } catch (err: any) {
+        console.error(`❌ Dosya yükleme hatası: ${file.name}`, err);
+        onError?.(err.message);
+      }
+    }
+    
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    return newFiles;
+  };
+
+  // Dosya kaldır
+  const removeFile = (fileId: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  // Tüm dosyaları temizle
+  const clearFiles = () => {
+    setUploadedFiles([]);
+  };
+
+  const sendMessage = async (prompt: string, additionalFiles?: UploadedFile[]) => {
+    if (!prompt.trim() && uploadedFiles.length === 0) return;
 
     setIsLoading(true);
     setError(null);
+
+    // Tüm dosyaları birleştir
+    const allFiles = [...uploadedFiles, ...(additionalFiles || [])];
 
     // Kullanıcı mesajını ekle
     const userMessage: ChatMessage = {
@@ -58,34 +132,51 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
       content: prompt,
       timestamp: new Date(),
       model,
+      attachments: allFiles.length > 0 ? allFiles : undefined
     };
 
     setMessages(prev => [...prev, userMessage]);
 
-    // Conversation history hazırla (son 20 mesaj)
+    // Conversation history hazırla (son 15 mesaj - dosya boyutu için azaltıldı)
     const conversationHistory = messages
-      .slice(-20) // Daha fazla context için artırıldı
+      .slice(-15)
       .map(msg => ({
         role: msg.role,
-        content: msg.content
+        content: msg.content,
+        attachments: msg.attachments // Dosya geçmişini de ekle
       }));
 
     try {
+      // Dosya bilgilerini formatla
+      const processedFiles = allFiles.map(file => ({
+        id: file.id,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        mimeType: file.mimeType,
+        content: file.data, // Base64 content
+        // Dosya preview'u için ilk 500 karakter (text dosyaları için)
+        preview: isTextFile(file.mimeType) ? 
+          atob(file.data).substring(0, 500) + (atob(file.data).length > 500 ? '...' : '') 
+          : null
+      }));
+
       // API request payload'u hazırla
       const requestPayload = {
         model,
-        prompt,
+        prompt: prompt || "Yüklenen dosyaları analiz et.",
         conversation_history: conversationHistory,
         max_tokens: getMaxTokensForModel(model),
         temperature: getTemperatureForModel(model),
-        files: files || []
+        files: processedFiles // İşlenmiş dosyalar
       };
 
       console.log('🚀 API isteği gönderiliyor:', {
         model,
         provider: detectProvider(model),
         historyLength: conversationHistory.length,
-        hasFiles: (files?.length || 0) > 0
+        filesCount: processedFiles.length,
+        totalFileSize: processedFiles.reduce((sum, f) => sum + f.size, 0)
       });
 
       // API çağrısı
@@ -136,6 +227,10 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // Başarılı gönderim sonrası dosyaları temizle
+      clearFiles();
+      
       onSuccess?.();
 
     } catch (err: any) {
@@ -163,6 +258,7 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
   const resetChat = () => {
     setMessages([]);
     setError(null);
+    clearFiles();
   };
 
   return {
@@ -171,6 +267,12 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
     error,
     sendMessage,
     resetChat,
+    // Dosya yönetimi
+    uploadedFiles,
+    addFiles,
+    removeFile,
+    clearFiles,
+    uploadFile
   };
 };
 
@@ -180,6 +282,47 @@ function detectProvider(model: string): string {
   if (model.includes('gpt') || model.includes('o1') || model.includes('o3') || model.includes('o4')) return 'openai';
   if (model.includes('gemini') || model.includes('veo')) return 'google';
   return 'unknown';
+}
+
+function getFileTypeFromExtension(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  const typeMap: Record<string, string> = {
+    'js': 'javascript',
+    'ts': 'typescript', 
+    'tsx': 'typescript',
+    'jsx': 'javascript',
+    'py': 'python',
+    'css': 'css',
+    'html': 'html',
+    'htm': 'html',
+    'json': 'json',
+    'txt': 'text',
+    'md': 'markdown',
+    'xml': 'xml',
+    'sql': 'sql',
+    'yml': 'yaml',
+    'yaml': 'yaml',
+    'pdf': 'pdf',
+    'doc': 'document',
+    'docx': 'document',
+    'xls': 'spreadsheet',
+    'xlsx': 'spreadsheet',
+    'csv': 'csv',
+    'png': 'image',
+    'jpg': 'image',
+    'jpeg': 'image',
+    'gif': 'image',
+    'webp': 'image'
+  };
+  
+  return typeMap[ext] || 'unknown';
+}
+
+function isTextFile(mimeType: string): boolean {
+  return mimeType.startsWith('text/') || 
+         mimeType === 'application/json' ||
+         mimeType === 'application/javascript' ||
+         mimeType === 'application/xml';
 }
 
 function getMaxTokensForModel(model: string): number {

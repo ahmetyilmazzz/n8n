@@ -1,7 +1,7 @@
 'use client';
 
 import { FileViewerPanel } from '@/components/FileViewerPanel';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/use-chat-hook';
 import ReactMarkdown from 'react-markdown';
 
@@ -28,7 +28,18 @@ interface GeneratedFile {
   id: string;
   name: string;
   content: string;
-  type: 'javascript' | 'typescript' | 'python' | 'css' | 'html' | 'json' | 'txt' | 'markdown' | 'xml' | 'sql' | 'yaml';
+  type:
+    | 'javascript'
+    | 'typescript'
+    | 'python'
+    | 'css'
+    | 'html'
+    | 'json'
+    | 'txt'
+    | 'markdown'
+    | 'xml'
+    | 'sql'
+    | 'yaml';
   size: number;
   createdAt: Date;
 }
@@ -46,7 +57,7 @@ const AI_MODELS: AIModel[] = [
   { id: 'claude-opus-4', name: 'Claude Opus 4.x', provider: 'claude', tier: 'flagship' },
   { id: 'claude-sonnet-3.7', name: 'Claude Sonnet 3.7', provider: 'claude', tier: 'flagship' },
   { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'claude', tier: 'flagship' },
-  
+
   // ChatGPT modelleri (OpenAI)
   { id: 'gpt-4o', name: 'GPT-4o (En Yeni)', provider: 'chatgpt', tier: 'flagship' },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'chatgpt', tier: 'fast' },
@@ -79,7 +90,6 @@ const AI_MODELS: AIModel[] = [
   { id: 'dall-e-2', name: '🖼️ DALL-E 2', provider: 'chatgpt', tier: 'balanced' },
   { id: 'dall-e-3', name: '🎨 DALL-E 3', provider: 'chatgpt', tier: 'flagship' },
 
-  
   // Gemini modelleri (Google)
   { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini', tier: 'flagship' },
   { id: 'gemini-1.5-pro-exp-0827', name: 'Gemini 1.5 Pro Experimental', provider: 'gemini', tier: 'flagship' },
@@ -90,14 +100,13 @@ const AI_MODELS: AIModel[] = [
   { id: 'gemini-2.5-pro', name: '💎 Gemini 2.5 Pro', provider: 'gemini', tier: 'flagship' },
   { id: 'gemini-2.5-flash', name: '⚡ Gemini 2.5 Flash', provider: 'gemini', tier: 'fast' },
   { id: 'gemini-2.5-flash-lite', name: '🔹 Gemini 2.5 Flash-Lite', provider: 'gemini', tier: 'fast' },
-  
+
   // Video ve Multimedya
   { id: 'veo-3', name: '🎬 Veo 3 (Video)', provider: 'gemini', tier: 'flagship' },
   { id: 'gemini-2.5-flash-image', name: '🖼️ Gemini 2.5 Flash Image', provider: 'gemini', tier: 'balanced' },
-  
+
   // Embedding ve Özel Modeller
   { id: 'gemini-embeddings', name: '🔗 Gemini Embeddings', provider: 'gemini', tier: 'balanced' },
-
 ];
 
 // Tier simgeleri
@@ -105,12 +114,11 @@ const TIER_ICONS = {
   flagship: '🚀',
   balanced: '⚖️',
   fast: '⚡',
-  legacy: '📦'
+  legacy: '📦',
 };
 
-// Model konfigürasyonları (o-series ve yeni modeller için)
+// Model konfigürasyonları (özet – sayfada kullanılmıyor ama bilinsin diye bırakıldı)
 const SPECIAL_MODEL_CONFIGS = {
-  // O-series modelleri için özel ayarlar
   'o1-preview': { maxTokens: 32768, temperature: 1.0, supportsSystemPrompt: false },
   'o1-mini': { maxTokens: 65536, temperature: 1.0, supportsSystemPrompt: false },
   'o1-pro': { maxTokens: 32768, temperature: 1.0, supportsSystemPrompt: false },
@@ -119,56 +127,42 @@ const SPECIAL_MODEL_CONFIGS = {
   'o3-deep-research': { maxTokens: 60000, temperature: 1.0, supportsSystemPrompt: false },
   'o4-mini': { maxTokens: 32768, temperature: 1.0, supportsSystemPrompt: false },
   'o4-mini-deep-research': { maxTokens: 40000, temperature: 1.0, supportsSystemPrompt: false },
-  
-  // GPT-5 serisi için ayarlar
   'gpt-5': { maxTokens: 128000, temperature: 0.7, supportsSystemPrompt: true },
   'gpt-5-mini': { maxTokens: 64000, temperature: 0.7, supportsSystemPrompt: true },
   'gpt-5-nano': { maxTokens: 32000, temperature: 0.7, supportsSystemPrompt: true },
-  
-  // GPT-4.1 serisi
   'gpt-4.1': { maxTokens: 32000, temperature: 0.7, supportsSystemPrompt: true },
   'gpt-4.1-mini': { maxTokens: 16000, temperature: 0.7, supportsSystemPrompt: true },
   'gpt-4.1-nano': { maxTokens: 8000, temperature: 0.7, supportsSystemPrompt: true },
-  
-  // Realtime modeller
   'gpt-realtime': { maxTokens: 16000, temperature: 0.7, supportsRealtime: true },
   'gpt-4o-realtime': { maxTokens: 32000, temperature: 0.7, supportsRealtime: true },
-  
-  // Gemini 2.5 serisi
   'gemini-2.5-pro': { maxTokens: 100000, temperature: 0.7, supportsMultimodal: true },
   'gemini-2.5-flash': { maxTokens: 50000, temperature: 0.7, supportsMultimodal: true },
   'veo-3': { maxTokens: 32000, temperature: 0.7, supportsVideo: true },
-  
-  // Claude 4.x serisi
   'claude-sonnet-4-20250514': { maxTokens: 200000, temperature: 0.7, supportsSystemPrompt: true },
   'claude-opus-4': { maxTokens: 200000, temperature: 0.7, supportsSystemPrompt: true },
 };
 
-// Suggestion örnekleri
 const SUGGESTIONS = [
   "Python'da makine öğrenmesi projesi nasıl başlarım?",
-  "React Native ile mobil uygulama geliştirme",
-  "SQL veritabanı optimizasyon teknikleri",
-  "Web güvenliği en iyi uygulamaları"
+  'React Native ile mobil uygulama geliştirme',
+  'SQL veritabanı optimizasyon teknikleri',
+  'Web güvenliği en iyi uygulamaları',
 ];
 
 // Basit UI Bileşenleri
-const Button = ({ children, variant = 'default', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'active' | 'secondary' }) => (
-  <button 
-    {...props} 
-    className={`btn ${variant === 'active' ? 'btn-active' : variant === 'secondary' ? 'btn-secondary' : ''}`}
-  >
+const Button = ({
+  children,
+  variant = 'default',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'active' | 'secondary' }) => (
+  <button {...props} className={`btn ${variant === 'active' ? 'btn-active' : variant === 'secondary' ? 'btn-secondary' : ''}`}>
     {children}
   </button>
 );
 
-const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-  <input {...props} className="input-field" />
-);
+const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} className="input-field" />;
 
-const TextArea = (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
-  <textarea {...props} className="input-field" />
-);
+const TextArea = (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} className="input-field" />;
 
 const Select = ({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) => (
   <select {...props} className="select-field">
@@ -181,12 +175,11 @@ const useTheme = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
-    // Browser ortamında localStorage kontrolü
     if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+      const savedTheme = (localStorage.getItem('theme') as 'light' | 'dark' | null) || null;
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
-      
+
       setTheme(initialTheme);
       document.documentElement.setAttribute('data-theme', initialTheme);
     }
@@ -206,53 +199,60 @@ const useTheme = () => {
 
 // Dosya türü belirleme fonksiyonu
 const detectFileType = (content: string, language?: string): GeneratedFile['type'] => {
-  // İlk önce language parametresini kontrol et
   if (language) {
     const langMap: Record<string, GeneratedFile['type']> = {
-      'javascript': 'javascript',
-      'js': 'javascript',
-      'typescript': 'typescript',
-      'ts': 'typescript',
-      'python': 'python',
-      'py': 'python',
-      'css': 'css',
-      'html': 'html',
-      'json': 'json',
-      'markdown': 'markdown',
-      'md': 'markdown',
-      'xml': 'xml',
-      'sql': 'sql',
-      'yaml': 'yaml',
-      'yml': 'yaml'
+      javascript: 'javascript',
+      js: 'javascript',
+      typescript: 'typescript',
+      ts: 'typescript',
+      python: 'python',
+      py: 'python',
+      css: 'css',
+      html: 'html',
+      json: 'json',
+      markdown: 'markdown',
+      md: 'markdown',
+      xml: 'xml',
+      sql: 'sql',
+      yaml: 'yaml',
+      yml: 'yaml',
     };
-    
-    if (langMap[language.toLowerCase()]) {
-      return langMap[language.toLowerCase()];
-    }
+    if (langMap[language.toLowerCase()]) return langMap[language.toLowerCase()];
   }
 
-  // İçerik analizi ile tahmin et
   if (content.includes('import React') || content.includes('export default')) return 'typescript';
   if (content.includes('def ') || content.includes('import ')) return 'python';
   if (content.includes('<html') || content.includes('<!DOCTYPE')) return 'html';
   if (content.includes('{') && content.includes('"')) return 'json';
   if (content.includes('SELECT') || content.includes('CREATE TABLE')) return 'sql';
   if (content.includes('---') && content.includes(':')) return 'yaml';
-  
+
   return 'txt';
 };
 
-// Terminal Kod Bloğu Bileşeni
-const CodeBlock = ({ children, language = '' }: { children: string, language?: string }) => {
+const CodeBlock = ({ 
+  children, 
+  language = '', 
+  filename,
+  onCreateFile 
+}: { 
+  children: string; 
+  language?: string; 
+  filename?: string;
+  onCreateFile?: (code: string, language: string, filename?: string) => void;
+}) => {
   const [copied, setCopied] = useState(false);
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(children);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(children);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Kopyalama hatası:', err);
+    }
   };
 
-  // Dil ikonları
   const getLanguageIcon = (lang: string) => {
     const icons: Record<string, string> = {
       python: '🐍',
@@ -266,33 +266,83 @@ const CodeBlock = ({ children, language = '' }: { children: string, language?: s
       shell: '💻',
       sql: '🗃️',
       json: '📋',
-      xml: '📄'
+      xml: '📄',
+      yaml: '⚙️',
+      dockerfile: '🐳',
+      php: '🐘',
+      go: '🐹',
+      rust: '🦀',
     };
     return icons[lang.toLowerCase()] || '📄';
   };
 
+  const handleCreateFile = () => {
+    if (onCreateFile) {
+      onCreateFile(children, language, filename);
+    }
+  };
+
+  const shouldShowCreateFileButton = children.length > 50;
+
   return (
-    <div className="code-block">
+    <div className="code-block-enhanced">
       <div className="code-header">
-        <div className="language-tag">
-          {getLanguageIcon(language)} {language.toLowerCase() || 'kod'}
+        <div className="code-info">
+          <span className="language-tag">
+            {getLanguageIcon(language)} {language.toLowerCase() || 'kod'}
+          </span>
+          {filename && (
+            <span className="filename-tag">
+              📁 {filename}
+            </span>
+          )}
         </div>
-        <button
-          onClick={copyToClipboard}
-          className="copy-btn"
-        >
-          {copied ? '✅ Kopyalandı' : '📋 Kopyala'}
-        </button>
+        
+        <div className="code-actions">
+          <button onClick={copyToClipboard} className="code-action-btn">
+            {copied ? '✅ Kopyalandı' : '📋 Kopyala'}
+          </button>
+          
+          {shouldShowCreateFileButton && (
+            <button 
+              onClick={handleCreateFile}
+              className="code-action-btn create-file-btn"
+              title="Dosya panelinde aç"
+            >
+              📄 Dosya Aç
+            </button>
+          )}
+        </div>
       </div>
-      <pre className="code-content">
-        <code>{children}</code>
-      </pre>
+      
+      <div className="code-container">
+        <pre className="code-content">
+          <code className={`language-${language}`}>
+            {children}
+          </code>
+        </pre>
+        
+        <div className="code-stats">
+          <span className="code-lines">
+            📝 {children.split('\n').length} satır
+          </span>
+          <span className="code-chars">
+            🔤 {children.length} karakter
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
 
+
 // Attachment Seçici Bileşeni (Grok tarzı)
-const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
+const AttachmentSelector = ({
+  onFileUpload,
+  onImagePaste,
+  isOpen,
+  onClose,
+}: {
   onFileUpload: (files: UploadedFile[]) => void;
   onImagePaste: () => void;
   isOpen: boolean;
@@ -305,17 +355,15 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
     if (!files) return;
 
     const newFiles: UploadedFile[] = [];
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      
-      // Dosya boyutu kontrolü
+
       if (file.size > 10 * 1024 * 1024) {
         alert(`Dosya çok büyük: ${file.name}. Maksimum 10MB desteklenir.`);
         continue;
       }
 
-      // Resim dosyası kontrolü (eğer resim seçici kullanıldıysa)
       if (isImage && !file.type.startsWith('image/')) {
         alert(`Sadece resim dosyaları seçebilirsiniz: ${file.name}`);
         continue;
@@ -332,7 +380,7 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
         name: file.name,
         type: file.type,
         size: file.size,
-        data: fileData
+        data: fileData,
       });
     }
 
@@ -342,13 +390,8 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
     }
   };
 
-  const handleImageClick = () => {
-    imageInputRef.current?.click();
-  };
-
-  const handleFileClick = () => {
-    fileInputRef.current?.click();
-  };
+  const handleImageClick = () => imageInputRef.current?.click();
+  const handleFileClick = () => fileInputRef.current?.click();
 
   const handlePasteClick = () => {
     onImagePaste();
@@ -359,10 +402,8 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
 
   return (
     <>
-      {/* Overlay */}
       <div className="attachment-overlay" onClick={onClose}></div>
-      
-      {/* Seçenekler Menüsü */}
+
       <div className="attachment-menu">
         <div className="attachment-option" onClick={handleImageClick}>
           <div className="attachment-icon">🖼️</div>
@@ -371,7 +412,7 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
             <div className="attachment-subtitle">Resim dosyalarını yükleyin</div>
           </div>
         </div>
-        
+
         <div className="attachment-option" onClick={handleFileClick}>
           <div className="attachment-icon">📎</div>
           <div className="attachment-text">
@@ -389,7 +430,6 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
         </div>
       </div>
 
-      {/* Gizli input elementleri */}
       <input
         ref={imageInputRef}
         type="file"
@@ -398,7 +438,7 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
         onChange={(e) => handleFileSelect(e.target.files, true)}
         style={{ display: 'none' }}
       />
-      
+
       <input
         ref={fileInputRef}
         type="file"
@@ -412,10 +452,7 @@ const AttachmentSelector = ({ onFileUpload, onImagePaste, isOpen, onClose }: {
 };
 
 // Yüklenen Dosyaları Göster
-const UploadedFilesList = ({ files, onRemoveFile }: {
-  files: UploadedFile[];
-  onRemoveFile: (fileId: string) => void;
-}) => {
+const UploadedFilesList = ({ files, onRemoveFile }: { files: UploadedFile[]; onRemoveFile: (fileId: string) => void }) => {
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -446,12 +483,7 @@ const UploadedFilesList = ({ files, onRemoveFile }: {
               <span className="file-size">({formatFileSize(file.size)})</span>
             </div>
           </div>
-          <button
-            onClick={() => onRemoveFile(file.id)}
-            className="remove-file-btn"
-            type="button"
-            title="Dosyayı kaldır"
-          >
+          <button onClick={() => onRemoveFile(file.id)} className="remove-file-btn" type="button" title="Dosyayı kaldır">
             ×
           </button>
         </div>
@@ -461,10 +493,7 @@ const UploadedFilesList = ({ files, onRemoveFile }: {
 };
 
 // Oluşturulan Dosyalar Listesi Bileşeni
-const GeneratedFilesList = ({ files, onViewFile }: {
-  files: GeneratedFile[];
-  onViewFile: (file: GeneratedFile) => void;
-}) => {
+const GeneratedFilesList = ({ files, onViewFile }: { files: GeneratedFile[]; onViewFile: (file: GeneratedFile) => void }) => {
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -485,7 +514,7 @@ const GeneratedFilesList = ({ files, onViewFile }: {
       markdown: '📝',
       xml: '📄',
       sql: '🗃️',
-      yaml: '⚙️'
+      yaml: '⚙️',
     };
     return icons[type as keyof typeof icons] || '📄';
   };
@@ -497,23 +526,15 @@ const GeneratedFilesList = ({ files, onViewFile }: {
       <h4 className="generated-files-title">📁 Oluşturulan Dosyalar</h4>
       <div className="generated-files-list">
         {files.map((file) => (
-          <div
-            key={file.id}
-            className="generated-file-item"
-            onClick={() => onViewFile(file)}
-          >
+          <div key={file.id} className="generated-file-item" onClick={() => onViewFile(file)}>
             <div className="file-info">
               <span className="file-icon">{getFileIcon(file.type)}</span>
               <div className="file-details">
                 <span className="file-name">{file.name}</span>
-                <span className="file-meta">
-                  {file.type.toUpperCase()} • {formatFileSize(file.size)}
-                </span>
+                <span className="file-meta">{file.type.toUpperCase()} • {formatFileSize(file.size)}</span>
               </div>
             </div>
-            <button className="view-file-btn" title="Dosyayı görüntüle">
-              👁️
-            </button>
+            <button className="view-file-btn" title="Dosyayı görüntüle">👁️</button>
           </div>
         ))}
       </div>
@@ -522,24 +543,26 @@ const GeneratedFilesList = ({ files, onViewFile }: {
 };
 
 // Markdown Mesaj Bileşeni
-const MarkdownMessage = ({ content, isUser, onCodeDetected }: { 
-  content: string, 
-  isUser: boolean,
-  onCodeDetected?: (code: string, language: string, filename?: string) => void 
+const MarkdownMessage = ({
+  content,
+  isUser,
+  onCodeDetected,
+}: {
+  content: string;
+  isUser: boolean;
+  onCodeDetected?: (code: string, language: string, filename?: string) => void;
 }) => {
-  if (isUser) {
-    return <span>{content}</span>;
-  }
+  if (isUser) return <span>{content}</span>;
 
   return (
     <ReactMarkdown
       components={{
-        code: ({ node, className, children, ...props }: any) => {
+        code: ({ className, children, ...props }: any) => {
           const match = /language-(\w+)/.exec(className || '');
           const language = match ? match[1] : '';
           const isInline = !className || !className.startsWith('language-');
           const codeContent = String(children).replace(/\n$/, '');
-          
+
           if (isInline) {
             return (
               <code className="inline-code" {...props}>
@@ -548,32 +571,35 @@ const MarkdownMessage = ({ content, isUser, onCodeDetected }: {
             );
           }
 
-          // Kod bloğu algılandığında callback çağır
-          if (onCodeDetected && codeContent.length > 50) { // Kısa kod parçalarını değil, dosya boyutundakileri al
-            // Dosya adını tahmin et
-            let filename = 'generated-code';
-            if (language) {
-              const extensions = {
-                javascript: '.js',
-                typescript: '.ts',
-                python: '.py',
-                css: '.css',
-                html: '.html',
-                json: '.json',
-                markdown: '.md',
-                xml: '.xml',
-                sql: '.sql',
-                yaml: '.yml'
-              };
-              filename += extensions[language as keyof typeof extensions] || '.txt';
-            } else {
-              filename += '.txt';
-            }
-            
-            onCodeDetected(codeContent, language, filename);
+          // Basit dosya adı tahmini
+          let filename = 'generated-code';
+          if (language) {
+            const extensions: Record<string, string> = {
+              javascript: '.js',
+              typescript: '.ts',
+              python: '.py',
+              css: '.css',
+              html: '.html',
+              json: '.json',
+              markdown: '.md',
+              xml: '.xml',
+              sql: '.sql',
+              yaml: '.yml',
+            };
+            filename += extensions[language as keyof typeof extensions] || '.txt';
+          } else {
+            filename += '.txt';
           }
 
-          return <CodeBlock language={language}>{codeContent}</CodeBlock>;
+          return (
+            <CodeBlock 
+              language={language} 
+              filename={filename}
+              onCreateFile={onCodeDetected}
+            >
+              {codeContent}
+            </CodeBlock>
+          );
         },
         h1: ({ children }) => <h1 className="heading-1">{children}</h1>,
         h2: ({ children }) => <h2 className="heading-2">{children}</h2>,
@@ -582,22 +608,17 @@ const MarkdownMessage = ({ content, isUser, onCodeDetected }: {
         ol: ({ children }) => <ol className="list-ol">{children}</ol>,
         li: ({ children }) => <li className="list-item">{children}</li>,
         p: ({ children }) => {
-          const content = String(children);
-          
-          // JSON benzeri içerik algıla
-          const isJSONLike = content.trim().match(/^\s*[\[{].*[\]}]\s*$/) && 
-                            (content.includes('"') || content.includes(':'));
-          
+          const raw = String(children);
+          const isJSONLike = raw.trim().match(/^\s*[\[{].*[\]}]\s*$/) && (raw.includes('"') || raw.includes(':'));
           if (isJSONLike) {
             try {
-              const parsed = JSON.parse(content.trim());
+              const parsed = JSON.parse(raw.trim());
               const formatted = JSON.stringify(parsed, null, 2);
               return <CodeBlock language="json">{formatted}</CodeBlock>;
             } catch {
-              // JSON parse edilemezse normal paragraf olarak göster
+              // normal paragraf
             }
           }
-          
           return <p className="paragraph">{children}</p>;
         },
         strong: ({ children }) => <strong className="bold">{children}</strong>,
@@ -606,7 +627,7 @@ const MarkdownMessage = ({ content, isUser, onCodeDetected }: {
         thead: ({ children }) => <thead className="table-head">{children}</thead>,
         th: ({ children }) => <th className="table-header">{children}</th>,
         td: ({ children }) => <td className="table-cell">{children}</td>,
-        blockquote: ({ children }) => <blockquote className="blockquote">{children}</blockquote>
+        blockquote: ({ children }) => <blockquote className="blockquote">{children}</blockquote>,
       }}
     >
       {content}
@@ -624,47 +645,54 @@ export default function ChatPage() {
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [showFileViewer, setShowFileViewer] = useState(false);
   const [currentViewFile, setCurrentViewFile] = useState<GeneratedFile | null>(null);
-  
+
+  // 🔐 Bu set, aynı kod bloğundan tekrar tekrar dosya üretilmesini engeller
+  const processedKeysRef = useRef<Set<string>>(new Set());
+
   const { theme, toggleTheme } = useTheme();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { messages, isLoading, error, sendMessage, resetChat } = useChat({
     model: selectedModel,
     onError: (err) => {
-      console.error("Bir Hata Oluştu:", err);
-    }
+      console.error('Bir Hata Oluştu:', err);
+    },
   });
 
-  // Seçilen provider'a göre modelleri filtrele
-  const availableModels = AI_MODELS.filter(model => model.provider === selectedProvider);
+  const availableModels = AI_MODELS.filter((model) => model.provider === selectedProvider);
 
-  // Provider değiştiğinde ilk modeli seç
   const handleProviderChange = (provider: AIProvider) => {
     setSelectedProvider(provider);
-    const firstModel = AI_MODELS.find(m => m.provider === provider);
-    if (firstModel) {
-      setSelectedModel(firstModel.id);
-    }
+    const firstModel = AI_MODELS.find((m) => m.provider === provider);
+    if (firstModel) setSelectedModel(firstModel.id);
   };
 
-  // Kod algılandığında dosya oluştur
-  const handleCodeDetected = (code: string, language: string, filename?: string) => {
+  // ✅ GÜVENLİ: Kod algılama; tekrar tetiklenmeyi set ile engeller ve paneli açar
+  const handleCodeDetected = useCallback((code: string, language: string, filename?: string) => {
+    const key = `${language || 'plain'}::${filename || 'noname'}::${code.length}::${code.slice(0, 50)}`;
+    if (processedKeysRef.current.has(key)) return;
+    processedKeysRef.current.add(key);
+
     const fileType = detectFileType(code, language);
-    const finalFilename = filename || `generated-${Date.now()}`;
-    
+
     const newFile: GeneratedFile = {
       id: Math.random().toString(36).substr(2, 9),
-      name: finalFilename.replace(/\.[^/.]+$/, ""), // Uzantıyı kaldır, detectFileType zaten ekleyecek
+      // Dosya adını uzantısıyla birlikte saklıyoruz; liste görünümünde aynen gösterilecek
+      name: filename || `generated-${Date.now()}.${fileType === 'txt' ? 'txt' : fileType}`,
       content: code,
       type: fileType,
       size: new Blob([code]).size,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
-    setGeneratedFiles(prev => [...prev, newFile]);
-  };
+    // Listeye ekle
+    setGeneratedFiles((prev) => [...prev, newFile]);
 
-  // Dosya görüntüleme
+    // 🔓 Paneli aç ve dosyayı göster
+    setCurrentViewFile(newFile);
+    setShowFileViewer(true);
+  }, []);
+
   const handleViewFile = (file: GeneratedFile) => {
     setCurrentViewFile(file);
     setShowFileViewer(true);
@@ -673,8 +701,7 @@ export default function ChatPage() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
-    
-    // Dosyalar ile beraber mesaj gönder
+
     sendMessage(inputValue, uploadedFiles);
     setInputValue('');
     setUploadedFiles([]);
@@ -686,14 +713,13 @@ export default function ChatPage() {
   };
 
   const handleFileUpload = (newFiles: UploadedFile[]) => {
-    setUploadedFiles(prev => [...prev, ...newFiles]);
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
   };
 
   const handleRemoveFile = (fileId: string) => {
-    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+    setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
-  // Clipboard'dan resim yapıştırma
   const handleImagePaste = async () => {
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -702,13 +728,13 @@ export default function ChatPage() {
       }
 
       const clipboardItems = await navigator.clipboard.read();
-      
+
       for (const clipboardItem of clipboardItems) {
         for (const type of clipboardItem.types) {
           if (type.startsWith('image/')) {
             const blob = await clipboardItem.getType(type);
             const reader = new FileReader();
-            
+
             reader.onload = (e) => {
               const imageData = e.target?.result as string;
               const newFile: UploadedFile = {
@@ -716,17 +742,17 @@ export default function ChatPage() {
                 name: `ekran-goruntusu-${Date.now()}.png`,
                 type: 'image/png',
                 size: blob.size,
-                data: imageData
+                data: imageData,
               };
-              setUploadedFiles(prev => [...prev, newFile]);
+              setUploadedFiles((prev) => [...prev, newFile]);
             };
-            
+
             reader.readAsDataURL(blob);
             return;
           }
         }
       }
-      
+
       alert('Panoda resim bulunamadı. Windows+Shift+S ile ekran görüntüsü alın.');
     } catch (err) {
       console.error('Pano erişim hatası:', err);
@@ -734,7 +760,6 @@ export default function ChatPage() {
     }
   };
 
-  // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
     const textarea = e.target;
@@ -742,37 +767,36 @@ export default function ChatPage() {
     textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
   };
 
-  // Sıfırla işlemi - oluşturulan dosyaları da temizle
   const handleResetChat = () => {
     resetChat();
     setGeneratedFiles([]);
+    setCurrentViewFile(null);
+    setShowFileViewer(false);
+    // Aynı oturumda önceki kodları yeniden üretmek istenirse set'i temizlemek mantıklı olabilir:
+    processedKeysRef.current.clear();
   };
 
-  // Aktif modelin bilgilerini al
-  const activeModel = AI_MODELS.find(m => m.id === selectedModel);
+  const activeModel = AI_MODELS.find((m) => m.id === selectedModel);
 
   return (
     <div className="chat-app">
       {/* Ana Chat Alanı */}
       <div className="chat-main">
-        {/* Sağ üst köşede tema ve ayarlar */}
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 200,
-          display: 'flex',
-          gap: '8px'
-        }}>
+        {/* Sağ üst köşe */}
+        <div
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 200,
+            display: 'flex',
+            gap: '8px',
+          }}
+        >
           <button onClick={toggleTheme} className="theme-toggle">
             {theme === 'light' ? '🌙' : '☀️'}
           </button>
-          <button 
-            onClick={() => setShowSettings(!showSettings)}
-            className="settings-toggle"
-            title="AI Ayarları"
-            style={{ position: 'static' }}
-          >
+          <button onClick={() => setShowSettings(!showSettings)} className="settings-toggle" title="AI Ayarları" style={{ position: 'static' }}>
             ⚙️
           </button>
         </div>
@@ -782,45 +806,33 @@ export default function ChatPage() {
           {messages.length === 0 && (
             <div className="empty-suggestions">
               {SUGGESTIONS.map((suggestion, index) => (
-                <div 
-                  key={index}
-                  className="suggestion-card"
-                  onClick={() => handleSuggestionClick(suggestion)}
-                >
+                <div key={index} className="suggestion-card" onClick={() => handleSuggestionClick(suggestion)}>
                   {suggestion}
                 </div>
               ))}
             </div>
           )}
-          
+
           {messages.map((msg) => (
             <div key={msg.id} className={`message ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}>
               <div className="message-header">
-                <span className="message-author">
-                  {msg.role === 'user' ? '👤 Siz' : `🤖 ${selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)}`}
-                </span>
-                <span className="message-time">
-                  {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                <span className="message-author">{msg.role === 'user' ? '👤 Siz' : `🤖 ${selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)}`}</span>
+                <span className="message-time">{new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <div className="message-content">
-                <MarkdownMessage 
-                  content={msg.content} 
+                <MarkdownMessage
+                  content={msg.content}
                   isUser={msg.role === 'user'}
+                  // ❗ Sadece assistant mesajlarında ve güvenli handle ile
                   onCodeDetected={msg.role === 'assistant' ? handleCodeDetected : undefined}
                 />
               </div>
             </div>
           ))}
-          
+
           {/* Oluşturulan Dosyalar Bölümü */}
-          {generatedFiles.length > 0 && (
-            <GeneratedFilesList 
-              files={generatedFiles}
-              onViewFile={handleViewFile}
-            />
-          )}
-          
+          {generatedFiles.length > 0 && <GeneratedFilesList files={generatedFiles} onViewFile={handleViewFile} />}
+
           {isLoading && (
             <div className="loading-message">
               <div className="loading-icon">🤖</div>
@@ -835,7 +847,7 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          
+
           {error && (
             <div className="error-message">
               ⚠️ <strong>HATA:</strong> {error}
@@ -848,10 +860,7 @@ export default function ChatPage() {
           <div className="input-wrapper">
             <form onSubmit={handleSubmit} className="input-form">
               {/* Yüklenen Dosyalar */}
-              <UploadedFilesList 
-                files={uploadedFiles}
-                onRemoveFile={handleRemoveFile}
-              />
+              <UploadedFilesList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
 
               {/* Ana input */}
               <div className="input-main">
@@ -863,7 +872,7 @@ export default function ChatPage() {
                 >
                   📎
                 </button>
-                
+
                 <TextArea
                   ref={textareaRef}
                   value={inputValue}
@@ -875,9 +884,7 @@ export default function ChatPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      if (!isLoading && inputValue.trim()) {
-                        handleSubmit(e as any);
-                      }
+                      if (!isLoading && inputValue.trim()) handleSubmit(e as any);
                     }
                   }}
                 />
@@ -891,60 +898,42 @@ export default function ChatPage() {
       </div>
 
       {/* Attachment Seçici */}
-      <AttachmentSelector 
-        isOpen={showAttachment}
-        onClose={() => setShowAttachment(false)}
-        onFileUpload={handleFileUpload}
-        onImagePaste={handleImagePaste}
-      />
+      <AttachmentSelector isOpen={showAttachment} onClose={() => setShowAttachment(false)} onFileUpload={handleFileUpload} onImagePaste={handleImagePaste} />
 
       {/* Dosya Görüntüleme Paneli */}
-      <FileViewerPanel
-        isOpen={showFileViewer}
-        onClose={() => setShowFileViewer(false)}
-        file={currentViewFile}
-      />
+      <FileViewerPanel isOpen={showFileViewer} onClose={() => setShowFileViewer(false)} file={currentViewFile} />
 
       {/* Sağ Alt Ayarlar Paneli */}
-      <div className={`settings-panel ${showSettings ? 'settings-open' : ''}`} style={{
-        position: 'fixed',
-        top: '70px',
-        right: '20px',
-        zIndex: 200
-      }}>
+      <div
+        className={`settings-panel ${showSettings ? 'settings-open' : ''}`}
+        style={{
+          position: 'fixed',
+          top: '70px',
+          right: '20px',
+          zIndex: 200,
+        }}
+      >
         {showSettings && (
           <div className="settings-content">
             <div className="settings-header">
               <h3>🤖 AI Ayarları</h3>
-              <button 
-                onClick={() => setShowSettings(false)}
-                className="close-btn"
-              >
+              <button onClick={() => setShowSettings(false)} className="close-btn">
                 ✕
               </button>
             </div>
-            
+
             {/* Provider Seçici */}
             <div className="setting-group">
               <label className="setting-label">AI Sağlayıcısı:</label>
               <div className="provider-buttons">
-                <Button 
-                  variant={selectedProvider === 'claude' ? 'active' : 'default'}
-                  onClick={() => handleProviderChange('claude')}
-                >
-                  🧠 Claude ({AI_MODELS.filter(m => m.provider === 'claude').length})
+                <Button variant={selectedProvider === 'claude' ? 'active' : 'default'} onClick={() => handleProviderChange('claude')}>
+                  🧠 Claude ({AI_MODELS.filter((m) => m.provider === 'claude').length})
                 </Button>
-                <Button 
-                  variant={selectedProvider === 'chatgpt' ? 'active' : 'default'}
-                  onClick={() => handleProviderChange('chatgpt')}
-                >
-                  🚀 ChatGPT ({AI_MODELS.filter(m => m.provider === 'chatgpt').length})
+                <Button variant={selectedProvider === 'chatgpt' ? 'active' : 'default'} onClick={() => handleProviderChange('chatgpt')}>
+                  🚀 ChatGPT ({AI_MODELS.filter((m) => m.provider === 'chatgpt').length})
                 </Button>
-                <Button 
-                  variant={selectedProvider === 'gemini' ? 'active' : 'default'}
-                  onClick={() => handleProviderChange('gemini')}
-                >
-                  💎 Gemini ({AI_MODELS.filter(m => m.provider === 'gemini').length})
+                <Button variant={selectedProvider === 'gemini' ? 'active' : 'default'} onClick={() => handleProviderChange('gemini')}>
+                  💎 Gemini ({AI_MODELS.filter((m) => m.provider === 'gemini').length})
                 </Button>
               </div>
             </div>
@@ -952,38 +941,43 @@ export default function ChatPage() {
             {/* Model Seçici */}
             <div className="setting-group">
               <label className="setting-label">Model:</label>
-              <Select 
-                value={selectedModel} 
-                onChange={(e) => setSelectedModel(e.target.value)}
-              >
+              <Select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
                 <optgroup label="🚀 Flagship (En Güçlü)">
-                  {availableModels.filter(m => m.tier === 'flagship').map(model => (
-                    <option key={model.id} value={model.id}>
-                      {TIER_ICONS[model.tier || 'balanced']} {model.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="⚖️ Balanced (Dengeli)">
-                  {availableModels.filter(m => m.tier === 'balanced').map(model => (
-                    <option key={model.id} value={model.id}>
-                      {TIER_ICONS[model.tier || 'balanced']} {model.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="⚡ Fast (Hızlı)">
-                  {availableModels.filter(m => m.tier === 'fast').map(model => (
-                    <option key={model.id} value={model.id}>
-                      {TIER_ICONS[model.tier || 'fast']} {model.name}
-                    </option>
-                  ))}
-                </optgroup>
-                {availableModels.some(m => m.tier === 'legacy') && (
-                  <optgroup label="📦 Legacy (Eski)">
-                    {availableModels.filter(m => m.tier === 'legacy').map(model => (
+                  {availableModels
+                    .filter((m) => m.tier === 'flagship')
+                    .map((model) => (
                       <option key={model.id} value={model.id}>
-                        {TIER_ICONS[model.tier || 'legacy']} {model.name}
+                        {TIER_ICONS[model.tier || 'balanced']} {model.name}
                       </option>
                     ))}
+                </optgroup>
+                <optgroup label="⚖️ Balanced (Dengeli)">
+                  {availableModels
+                    .filter((m) => m.tier === 'balanced')
+                    .map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {TIER_ICONS[model.tier || 'balanced']} {model.name}
+                      </option>
+                    ))}
+                </optgroup>
+                <optgroup label="⚡ Fast (Hızlı)">
+                  {availableModels
+                    .filter((m) => m.tier === 'fast')
+                    .map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {TIER_ICONS[model.tier || 'fast']} {model.name}
+                      </option>
+                    ))}
+                </optgroup>
+                {availableModels.some((m) => m.tier === 'legacy') && (
+                  <optgroup label="📦 Legacy (Eski)">
+                    {availableModels
+                      .filter((m) => m.tier === 'legacy')
+                      .map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {TIER_ICONS[model.tier || 'legacy']} {model.name}
+                        </option>
+                      ))}
                   </optgroup>
                 )}
               </Select>
@@ -993,9 +987,7 @@ export default function ChatPage() {
             {activeModel && (
               <div className={`model-status status-${activeModel.tier || 'balanced'}`}>
                 <strong>Aktif Model:</strong> {TIER_ICONS[activeModel.tier || 'balanced']} {selectedProvider.toUpperCase()} - {activeModel.name}
-                <span className="tier-badge">
-                  [{activeModel.tier?.toUpperCase() || 'BALANCED'}]
-                </span>
+                <span className="tier-badge">[{activeModel.tier?.toUpperCase() || 'BALANCED'}]</span>
               </div>
             )}
 

@@ -1,5 +1,5 @@
 // app/api/ai-gateway/route.ts
-// Geliştirilmiş Multi-AI Gateway - Tamamen Düzeltilmiş Versiyon
+// Geliştirilmiş Multi-AI Gateway - DOSYA DESTEĞİ EKLENMİŞ
 
 export const dynamic = 'force-dynamic';
 
@@ -22,16 +22,11 @@ const VALID_MODELS: Record<string, string[]> = {
     'gemini-1.5-pro', 'gemini-1.5-pro-exp-0827',
     'gemini-1.5-flash', 'gemini-1.5-flash-8b',
     'gemini-1.0-pro'
-  ],
-  // Yeni AI araçları buraya eklenebilir:
-  // perplexity: ['pplx-7b-online', 'pplx-70b-online'],
-  // anthropic: ['claude-instant-v1', 'claude-v1'],
-  // cohere: ['command-r', 'command-r-plus']
+  ]
 };
 
 // Model fallback haritası
 const MODEL_FALLBACKS: Record<string, string> = {
-  // Beta/Gelecek modeller -> mevcut modeller
   'gpt-5': 'gpt-4o',
   'gpt-5-mini': 'gpt-4o-mini',
   'o3': 'o1-preview',
@@ -41,17 +36,27 @@ const MODEL_FALLBACKS: Record<string, string> = {
   'claude-opus-4': 'claude-3-opus-20240229',
   'gemini-2.5-pro': 'gemini-1.5-pro',
   'gemini-2.5-flash': 'gemini-1.5-flash',
-  'veo-3': 'gemini-1.5-pro',
-  // Yeni fallback'ler buraya eklenebilir
+  'veo-3': 'gemini-1.5-pro'
 };
+
+// Dosya türü interface
+interface ProcessedFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  mimeType: string;
+  content: string; // Base64 content
+  preview?: string | null;
+}
 
 // Desteklenen provider tipleri
 type AIProvider = 'claude' | 'openai' | 'google';
 
-// Provider tespit fonksiyonu - Case insensitive
+// Provider tespit fonksiyonu
 function detectAIProvider(model: string): AIProvider {
   if (!model || typeof model !== 'string') {
-    return 'claude'; // Varsayılan
+    return 'claude';
   }
   
   const modelLower = model.toLowerCase();
@@ -62,11 +67,7 @@ function detectAIProvider(model: string): AIProvider {
       modelLower.includes('dall-e')) return 'openai';
   if (modelLower.includes('gemini') || modelLower.includes('veo')) return 'google';
   
-  // Yeni provider'lar buraya eklenebilir:
-  // if (modelLower.includes('pplx')) return 'perplexity';
-  // if (modelLower.includes('command')) return 'cohere';
-  
-  return 'claude'; // Varsayılan
+  return 'claude';
 }
 
 // Model validasyon ve fallback fonksiyonu
@@ -75,7 +76,6 @@ function validateAndMapModel(model: string): {
   provider: AIProvider; 
   isFallback: boolean 
 } {
-  // Boş model kontrolü
   if (!model || typeof model !== 'string' || model.trim() === '') {
     console.warn('⚠️ Model bilgisi eksik, varsayılan kullanılıyor');
     return {
@@ -88,7 +88,6 @@ function validateAndMapModel(model: string): {
   const trimmedModel = model.trim();
   const provider = detectAIProvider(trimmedModel);
   
-  // Model fallback kontrolü
   if (MODEL_FALLBACKS[trimmedModel]) {
     const fallbackModel = MODEL_FALLBACKS[trimmedModel];
     console.log(`🔄 Model fallback: ${trimmedModel} -> ${fallbackModel}`);
@@ -99,7 +98,6 @@ function validateAndMapModel(model: string): {
     };
   }
   
-  // Geçerli model listesi kontrolü - as any kaldırıldı
   const validModels = VALID_MODELS[provider] || [];
   if (validModels.includes(trimmedModel)) {
     return { 
@@ -109,7 +107,6 @@ function validateAndMapModel(model: string): {
     };
   }
   
-  // Geçersiz model için varsayılan fallback
   const defaultFallbacks: Record<string, string> = {
     claude: 'claude-3-5-sonnet-20241022',
     openai: 'gpt-4o',
@@ -126,7 +123,107 @@ function validateAndMapModel(model: string): {
   };
 }
 
-// Error response helper - Merkezi hata yönetimi
+// Dosya işleme fonksiyonu
+function processFilesForAI(files: ProcessedFile[], provider: AIProvider): any[] {
+  if (!files || !Array.isArray(files) || files.length === 0) {
+    return [];
+  }
+
+  console.log(`📁 ${files.length} dosya işleniyor (${provider} için)`);
+
+  return files.map(file => {
+    // Temel dosya bilgileri
+    const processedFile: any = {
+      id: file.id,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      mimeType: file.mimeType
+    };
+
+    // Provider'a göre format
+    switch (provider) {
+      case 'claude':
+        // Claude resim ve metin dosyalarını destekler
+        if (file.mimeType.startsWith('image/')) {
+          processedFile.content_type = 'image';
+          processedFile.data = file.content; // Base64
+        } else if (isTextFile(file.mimeType)) {
+          processedFile.content_type = 'text';
+          processedFile.text_content = decodeBase64(file.content);
+        } else {
+          processedFile.content_type = 'document';
+          processedFile.summary = `Dosya: ${file.name} (${file.size} bytes, ${file.mimeType})`;
+        }
+        break;
+
+      case 'openai':
+        // GPT-4 Vision resim desteği
+        if (file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml') {
+          processedFile.content_type = 'image';
+          processedFile.data = file.content;
+        } else if (isTextFile(file.mimeType)) {
+          processedFile.content_type = 'text'; 
+          processedFile.text_content = decodeBase64(file.content);
+        } else {
+          processedFile.content_type = 'document';
+          processedFile.summary = `Dosya yüklendi: ${file.name}`;
+        }
+        break;
+
+      case 'google':
+        // Gemini çoklu medya desteği
+        if (file.mimeType.startsWith('image/')) {
+          processedFile.content_type = 'image';
+          processedFile.inline_data = {
+            mime_type: file.mimeType,
+            data: file.content
+          };
+        } else if (isTextFile(file.mimeType)) {
+          processedFile.content_type = 'text';
+          processedFile.text_content = decodeBase64(file.content);
+        } else {
+          processedFile.content_type = 'document';
+          processedFile.summary = `Dosya: ${file.name} (${formatFileSize(file.size)})`;
+        }
+        break;
+    }
+
+    return processedFile;
+  });
+}
+
+// Yardımcı fonksiyonlar
+function isTextFile(mimeType: string): boolean {
+  const textTypes = [
+    'text/',
+    'application/json',
+    'application/javascript',
+    'application/xml',
+    'application/csv'
+  ];
+  
+  return textTypes.some(type => mimeType.includes(type));
+}
+
+function decodeBase64(base64: string): string {
+  try {
+    return atob(base64);
+  } catch (err) {
+    console.error('Base64 decode hatası:', err);
+    return '[Dosya içeriği okunamadı]';
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Error response helper
 function createErrorResponse(
   message: string, 
   code: string, 
@@ -163,7 +260,12 @@ export async function POST(req: Request): Promise<Response> {
     let body: any;
     try {
       body = await req.json();
-      console.log('📤 Gateway: Gönderilen veri:', JSON.stringify(body, null, 2));
+      console.log('📤 Gateway: Gönderilen veri:', {
+        model: body.model,
+        promptLength: body.prompt?.length || 0,
+        filesCount: body.files?.length || 0,
+        historyLength: body.conversation_history?.length || 0
+      });
     } catch (err) {
       console.error('❌ Gateway: İstek gövdesi JSON parse edilemedi:', err);
       return createErrorResponse(
@@ -181,6 +283,24 @@ export async function POST(req: Request): Promise<Response> {
       console.log(`🔄 Fallback kullanıldı: ${body.model} -> ${validatedModel}`);
     }
 
+    // Dosyaları işle
+    const processedFiles = processFilesForAI(body.files || [], provider);
+    
+    if (processedFiles.length > 0) {
+      console.log(`📁 ${processedFiles.length} dosya ${provider} formatında işlendi`);
+      
+      // Dosya boyut kontrolü (toplam 50MB limit)
+      const totalSize = (body.files || []).reduce((sum: number, file: any) => sum + (file.size || 0), 0);
+      if (totalSize > 50 * 1024 * 1024) {
+        return createErrorResponse(
+          'Toplam dosya boyutu 50MB limitini aşıyor',
+          'FILE_SIZE_EXCEEDED',
+          413,
+          { totalSize: formatFileSize(totalSize) }
+        );
+      }
+    }
+
     // Enhanced body hazırla
     const enhancedBody = {
       ...body,
@@ -189,8 +309,10 @@ export async function POST(req: Request): Promise<Response> {
       original_model: body.model || null,
       is_fallback: isFallback,
       timestamp: new Date().toISOString(),
-      // Dosya desteği için ek kontroller
-      files: Array.isArray(body.files) ? body.files : [],
+      // İşlenmiş dosyalar
+      processed_files: processedFiles,
+      files_count: processedFiles.length,
+      // Conversation history
       conversation_history: Array.isArray(body.conversation_history) ? body.conversation_history : []
     };
 
@@ -201,7 +323,7 @@ export async function POST(req: Request): Promise<Response> {
     
     // Modern AbortController ile timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 dakika (dosyalar için)
 
     let n8nResponse: Response;
     try {
@@ -209,11 +331,12 @@ export async function POST(req: Request): Promise<Response> {
         method: 'POST',
         headers: { 
           'content-type': 'application/json',
-          'user-agent': 'multi-ai-gateway/2.1',
+          'user-agent': 'multi-ai-gateway/2.2',
           'x-ai-provider': provider,
           'x-original-model': body.model || 'unknown',
           'x-validated-model': validatedModel,
-          'x-is-fallback': isFallback.toString()
+          'x-is-fallback': isFallback.toString(),
+          'x-files-count': processedFiles.length.toString()
         },
         body: JSON.stringify(enhancedBody),
         signal: controller.signal
@@ -265,6 +388,7 @@ export async function POST(req: Request): Promise<Response> {
           jsonResponse.model_used = validatedModel;
           jsonResponse.original_model = body.model || null;
           jsonResponse.is_fallback = isFallback;
+          jsonResponse.files_processed = processedFiles.length;
           jsonResponse.response_time = new Date().toISOString();
         }
         
@@ -274,7 +398,8 @@ export async function POST(req: Request): Promise<Response> {
             'content-type': 'application/json',
             'x-ai-provider': provider,
             'x-model-used': validatedModel,
-            'x-is-fallback': isFallback.toString()
+            'x-is-fallback': isFallback.toString(),
+            'x-files-processed': processedFiles.length.toString()
           },
         });
       } catch (parseErr) {
@@ -302,6 +427,7 @@ export async function POST(req: Request): Promise<Response> {
           model_used: validatedModel,
           original_model: body.model || null,
           is_fallback: isFallback,
+          files_processed: processedFiles.length,
           metadata: {
             contentType,
             status,
@@ -324,7 +450,8 @@ export async function POST(req: Request): Promise<Response> {
         'content-type': 'application/json',
         'x-ai-provider': provider,
         'x-model-used': validatedModel,
-        'x-is-fallback': isFallback.toString()
+        'x-is-fallback': isFallback.toString(),
+        'x-files-processed': processedFiles.length.toString()
       },
     });
 
@@ -334,7 +461,7 @@ export async function POST(req: Request): Promise<Response> {
     // AbortError (timeout) kontrolü
     if (err.name === 'AbortError') {
       return createErrorResponse(
-        'AI sistemi zaman aşımına uğradı (60s)', 
+        'AI sistemi zaman aşımına uğradı (2dk)', 
         'TIMEOUT', 
         504
       );
