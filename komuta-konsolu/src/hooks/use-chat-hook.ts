@@ -1,5 +1,5 @@
 // hooks/use-chat-hook.ts
-// Çoklu AI destekli chat hook'u - DOSYA DESTEĞİ EKLENMİŞ
+// Çoklu AI destekli chat hook'u - GÖRSEL VE VİDEO DESTEĞİ EKLENMİŞ
 
 'use client';
 
@@ -13,6 +13,12 @@ export interface ChatMessage {
   model?: string;
   provider?: string;
   attachments?: UploadedFile[]; // Dosya ekleri için
+  // Yeni alanlar - görsel/video desteği
+  kind?: 'text' | 'image' | 'video'; // Mesaj türü
+  status?: 'pending' | 'processing' | 'completed' | 'failed'; // İşlem durumu
+  jobId?: string; // Asenkron job ID (video için)
+  url?: string; // Oluşturulan görsel/video URL'i
+  assetId?: string; // Asset ID (signed URL için)
 }
 
 export interface UploadedFile {
@@ -40,6 +46,12 @@ interface APIResponse {
   };
   provider?: string;
   model_used?: string;
+  // Yeni alanlar - multimodal yanıt
+  kind?: 'text' | 'image' | 'video';
+  jobId?: string;
+  url?: string;
+  assetId?: string;
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
 export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
@@ -47,6 +59,9 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+
+  // Polling işlemi için aktif job'ları takip et
+  const [activeJobs, setActiveJobs] = useState<Set<string>>(new Set());
 
   // Dosya yükleme fonksiyonu
   const uploadFile = async (file: File): Promise<UploadedFile> => {
@@ -116,11 +131,135 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
     setUploadedFiles([]);
   };
 
-  const sendMessage = async (prompt: string, additionalFiles?: UploadedFile[]) => {
+  // Video job durumunu polling ile kontrol et
+  const pollJobStatus = async (jobId: string, messageId: string) => {
+    if (activeJobs.has(jobId)) return; // Zaten polling yapılıyor
+    
+    setActiveJobs(prev => new Set(prev).add(jobId));
+    
+    const maxAttempts = 60; // 5 dakika (5sn aralıkla)
+    let attempts = 0;
+    
+    const poll = async () => {
+      try {
+        console.log(`🔄 Polling job ${jobId}, attempt ${attempts + 1}`);
+        
+        const response = await fetch(`/api/ai-gateway/status/${jobId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Status check failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.status === 'completed' && data.url) {
+          // Job tamamlandı, mesajı güncelle
+          console.log(`✅ Job ${jobId} completed: ${data.url}`);
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === messageId 
+              ? { 
+                  ...msg, 
+                  status: 'completed', 
+                  url: data.url,
+                  assetId: data.assetId,
+                  content: msg.content + '\n\n✅ Video hazır!'
+                }
+              : msg
+          ));
+          
+          setActiveJobs(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(jobId);
+            return newSet;
+          });
+          
+          return; // Polling'i durdur
+        } else if (data.status === 'failed') {
+          // Job başarısız
+          console.error(`❌ Job ${jobId} failed:`, data.error);
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === messageId 
+              ? { 
+                  ...msg, 
+                  status: 'failed',
+                  content: msg.content + '\n\n❌ Video oluşturma başarısız oldu.'
+                }
+              : msg
+          ));
+          
+          setActiveJobs(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(jobId);
+            return newSet;
+          });
+          
+          return; // Polling'i durdur
+        }
+        
+        // Hala processing durumunda, devam et
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000); // 5 saniye bekle
+        } else {
+          // Timeout
+          console.warn(`⏰ Job ${jobId} polling timeout`);
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === messageId 
+              ? { 
+                  ...msg, 
+                  status: 'failed',
+                  content: msg.content + '\n\n⏰ Video oluşturma zaman aşımına uğradı.'
+                }
+              : msg
+          ));
+          
+          setActiveJobs(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(jobId);
+            return newSet;
+          });
+        }
+        
+      } catch (err: any) {
+        console.error(`❌ Job ${jobId} polling error:`, err);
+        attempts++;
+        
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000); // Hata durumunda da tekrar dene
+        } else {
+          setActiveJobs(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(jobId);
+            return newSet;
+          });
+        }
+      }
+    };
+    
+    // İlk kontrolü hemen yap
+    setTimeout(poll, 2000); // 2 saniye bekle (işleme başlaması için)
+  };
+
+  const sendMessage = async (prompt: string, additionalFiles?: UploadedFile[], messageMode?: 'chat' | 'image' | 'video') => {
     if (!prompt.trim() && uploadedFiles.length === 0) return;
 
     setIsLoading(true);
     setError(null);
+
+    // Varsayılan mod belirleme (model bazlı)
+    let mode = messageMode || 'chat';
+    if (!messageMode) {
+      if (model.includes('dall-e')) mode = 'image';
+      else if (model.includes('veo')) mode = 'video';
+    }
 
     // Tüm dosyaları birleştir
     const allFiles = [...uploadedFiles, ...(additionalFiles || [])];
@@ -132,7 +271,8 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
       content: prompt,
       timestamp: new Date(),
       model,
-      attachments: allFiles.length > 0 ? allFiles : undefined
+      attachments: allFiles.length > 0 ? allFiles : undefined,
+      kind: 'text' // Kullanıcı mesajları her zaman text
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -168,7 +308,8 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
         conversation_history: conversationHistory,
         max_tokens: getMaxTokensForModel(model),
         temperature: getTemperatureForModel(model),
-        files: processedFiles // İşlenmiş dosyalar
+        files: processedFiles,
+        mode: mode // Yeni alan: chat/image/video
       };
 
       console.log('🚀 API isteği gönderiliyor:', {
@@ -176,7 +317,8 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
         provider: detectProvider(model),
         historyLength: conversationHistory.length,
         filesCount: processedFiles.length,
-        totalFileSize: processedFiles.reduce((sum, f) => sum + f.size, 0)
+        totalFileSize: processedFiles.reduce((sum, f) => sum + f.size, 0),
+        mode
       });
 
       // API çağrısı
@@ -199,7 +341,10 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
         success: data.success, 
         hasContent: !!data.content,
         error: data.error?.message,
-        provider: data.provider 
+        provider: data.provider,
+        kind: data.kind,
+        jobId: data.jobId,
+        url: data.url
       });
 
       if (!response.ok) {
@@ -212,21 +357,33 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
         throw new Error(errorMsg);
       }
 
-      if (!data.content) {
-        throw new Error('API returned no content');
+      if (!data.content && !data.url && !data.jobId) {
+        throw new Error('API returned no content, URL, or job ID');
       }
 
       // AI yanıtını ekle
       const assistantMessage: ChatMessage = {
         id: Math.random().toString(36).substr(2, 9),
         role: 'assistant',
-        content: data.content,
+        content: data.content || (data.kind === 'video' ? '🎬 Video oluşturuluyor...' : '🖼️ Görsel oluşturuluyor...'),
         timestamp: new Date(),
         model: data.model_used || model,
         provider: data.provider || detectProvider(model),
+        // Multimodal alanlar
+        kind: data.kind || 'text',
+        status: data.status || (data.jobId ? 'processing' : 'completed'),
+        jobId: data.jobId,
+        url: data.url,
+        assetId: data.assetId
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // Video job'u için polling başlat
+      if (data.kind === 'video' && data.jobId && data.status === 'processing') {
+        console.log(`🔄 Starting polling for job ${data.jobId}`);
+        pollJobStatus(data.jobId, assistantMessage.id);
+      }
       
       // Başarılı gönderim sonrası dosyaları temizle
       clearFiles();
@@ -247,6 +404,8 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
         content: `❌ **Hata:** ${errorMessage}`,
         timestamp: new Date(),
         model,
+        kind: 'text',
+        status: 'failed'
       };
 
       setMessages(prev => [...prev, errorChatMessage]);
@@ -259,6 +418,8 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
     setMessages([]);
     setError(null);
     clearFiles();
+    // Aktif job'ları temizle
+    setActiveJobs(new Set());
   };
 
   return {
@@ -272,14 +433,16 @@ export const useChat = ({ model, onError, onSuccess }: UseChatOptions) => {
     addFiles,
     removeFile,
     clearFiles,
-    uploadFile
+    uploadFile,
+    // Video job tracking
+    activeJobs
   };
 };
 
 // Yardımcı fonksiyonlar
 function detectProvider(model: string): string {
   if (model.includes('claude')) return 'anthropic';
-  if (model.includes('gpt') || model.includes('o1') || model.includes('o3') || model.includes('o4')) return 'openai';
+  if (model.includes('gpt') || model.includes('o1') || model.includes('o3') || model.includes('o4') || model.includes('dall-e')) return 'openai';
   if (model.includes('gemini') || model.includes('veo')) return 'google';
   return 'unknown';
 }
@@ -361,6 +524,11 @@ function getMaxTokensForModel(model: string): number {
     'gemini-1.0-pro': 4096,
     'gemini-2.5-pro': 8192,
     'gemini-2.5-flash': 8192,
+    
+    // Image/Video models - daha düşük token limit
+    'dall-e-2': 1000,
+    'dall-e-3': 1000,
+    'veo-3': 2000,
   };
 
   // Model-specific limit döndür
@@ -373,6 +541,7 @@ function getMaxTokensForModel(model: string): number {
   if (model.includes('gpt-4') || model.includes('o1')) return 4096;
   if (model.includes('gpt-3.5')) return 4096;
   if (model.includes('gemini')) return 8192;
+  if (model.includes('dall-e') || model.includes('veo')) return 1000;
 
   return 4096; // varsayılan
 }
@@ -381,6 +550,11 @@ function getTemperatureForModel(model: string): number {
   // O-series modelleri sabit 1.0 temperature kullanır
   if (model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4')) {
     return 1.0;
+  }
+  
+  // Image/Video modelleri için düşük creativity
+  if (model.includes('dall-e') || model.includes('veo')) {
+    return 0.5;
   }
   
   // Diğer modeller için varsayılan

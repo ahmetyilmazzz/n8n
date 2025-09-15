@@ -1,5 +1,5 @@
 // app/api/ai-gateway/route.ts
-// Geliştirilmiş Multi-AI Gateway - DOSYA DESTEĞİ EKLENMİŞ
+// Geliştirilmiş Multi-AI Gateway - MULTIMODAL DESTEK EKLENMİŞ
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,7 @@ const VALID_MODELS: Record<string, string[]> = {
   google: [
     'gemini-1.5-pro', 'gemini-1.5-pro-exp-0827',
     'gemini-1.5-flash', 'gemini-1.5-flash-8b',
-    'gemini-1.0-pro'
+    'gemini-1.0-pro', 'veo-3'
   ]
 };
 
@@ -36,8 +36,11 @@ const MODEL_FALLBACKS: Record<string, string> = {
   'claude-opus-4': 'claude-3-opus-20240229',
   'gemini-2.5-pro': 'gemini-1.5-pro',
   'gemini-2.5-flash': 'gemini-1.5-flash',
-  'veo-3': 'gemini-1.5-pro'
+  'veo-3': 'veo-3' // Veo-3 kendine fallback (n8n'de handle edilecek)
 };
+
+// Mode tipleri
+type RequestMode = 'chat' | 'image' | 'video';
 
 // Dosya türü interface
 interface ProcessedFile {
@@ -68,6 +71,21 @@ function detectAIProvider(model: string): AIProvider {
   if (modelLower.includes('gemini') || modelLower.includes('veo')) return 'google';
   
   return 'claude';
+}
+
+// Mode tespit fonksiyonu
+function detectRequestMode(model: string, explicitMode?: string): RequestMode {
+  if (explicitMode && ['chat', 'image', 'video'].includes(explicitMode)) {
+    return explicitMode as RequestMode;
+  }
+  
+  const modelLower = model.toLowerCase();
+  
+  // Model bazlı mode belirleme
+  if (modelLower.includes('dall-e')) return 'image';
+  if (modelLower.includes('veo')) return 'video';
+  
+  return 'chat'; // Varsayılan
 }
 
 // Model validasyon ve fallback fonksiyonu
@@ -264,7 +282,8 @@ export async function POST(req: Request): Promise<Response> {
         model: body.model,
         promptLength: body.prompt?.length || 0,
         filesCount: body.files?.length || 0,
-        historyLength: body.conversation_history?.length || 0
+        historyLength: body.conversation_history?.length || 0,
+        mode: body.mode || 'chat'
       });
     } catch (err) {
       console.error('❌ Gateway: İstek gövdesi JSON parse edilemedi:', err);
@@ -278,7 +297,11 @@ export async function POST(req: Request): Promise<Response> {
     // Model validasyon ve mapping
     const { model: validatedModel, provider, isFallback } = validateAndMapModel(body.model);
     
+    // Mode belirleme
+    const mode = detectRequestMode(validatedModel, body.mode);
+    
     console.log(`🎯 Model Mapping: ${body.model || 'undefined'} -> ${validatedModel} (${provider})`);
+    console.log(`📋 Request Mode: ${mode}`);
     if (isFallback) {
       console.log(`🔄 Fallback kullanıldı: ${body.model} -> ${validatedModel}`);
     }
@@ -309,6 +332,7 @@ export async function POST(req: Request): Promise<Response> {
       original_model: body.model || null,
       is_fallback: isFallback,
       timestamp: new Date().toISOString(),
+      mode: mode, // Yeni alan: chat/image/video
       // İşlenmiş dosyalar
       processed_files: processedFiles,
       files_count: processedFiles.length,
@@ -321,9 +345,10 @@ export async function POST(req: Request): Promise<Response> {
     // n8n webhook URL'i
     const webhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook/ai-gateway';
     
-    // Modern AbortController ile timeout
+    // Modern AbortController ile timeout (video için daha uzun)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 dakika (dosyalar için)
+    const timeoutMs = mode === 'video' ? 180000 : 120000; // Video için 3dk, diğerleri 2dk
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     let n8nResponse: Response;
     try {
@@ -331,12 +356,13 @@ export async function POST(req: Request): Promise<Response> {
         method: 'POST',
         headers: { 
           'content-type': 'application/json',
-          'user-agent': 'multi-ai-gateway/2.2',
+          'user-agent': 'multi-ai-gateway/2.3',
           'x-ai-provider': provider,
           'x-original-model': body.model || 'unknown',
           'x-validated-model': validatedModel,
           'x-is-fallback': isFallback.toString(),
-          'x-files-count': processedFiles.length.toString()
+          'x-files-count': processedFiles.length.toString(),
+          'x-request-mode': mode // Yeni header
         },
         body: JSON.stringify(enhancedBody),
         signal: controller.signal
@@ -361,7 +387,7 @@ export async function POST(req: Request): Promise<Response> {
         'n8n yanıtı okunamadı', 
         'READ_ERROR', 
         502,
-        { provider }
+        { provider, mode }
       );
     }
 
@@ -372,7 +398,7 @@ export async function POST(req: Request): Promise<Response> {
         `${provider.toUpperCase()} sisteminden boş yanıt`, 
         'EMPTY_RESPONSE', 
         502,
-        { provider }
+        { provider, mode }
       );
     }
 
@@ -390,6 +416,7 @@ export async function POST(req: Request): Promise<Response> {
           jsonResponse.is_fallback = isFallback;
           jsonResponse.files_processed = processedFiles.length;
           jsonResponse.response_time = new Date().toISOString();
+          jsonResponse.mode = mode; // Mode bilgisini ekle
         }
         
         return new Response(JSON.stringify(jsonResponse), {
@@ -399,7 +426,8 @@ export async function POST(req: Request): Promise<Response> {
             'x-ai-provider': provider,
             'x-model-used': validatedModel,
             'x-is-fallback': isFallback.toString(),
-            'x-files-processed': processedFiles.length.toString()
+            'x-files-processed': processedFiles.length.toString(),
+            'x-request-mode': mode
           },
         });
       } catch (parseErr) {
@@ -411,6 +439,7 @@ export async function POST(req: Request): Promise<Response> {
           502,
           { 
             provider, 
+            mode,
             details: responseText.substring(0, 200) 
           }
         );
@@ -428,6 +457,7 @@ export async function POST(req: Request): Promise<Response> {
           original_model: body.model || null,
           is_fallback: isFallback,
           files_processed: processedFiles.length,
+          mode: mode,
           metadata: {
             contentType,
             status,
@@ -441,6 +471,7 @@ export async function POST(req: Request): Promise<Response> {
             code: 'AI_ERROR',
             status,
             provider: provider,
+            mode: mode
           },
         };
 
@@ -451,7 +482,8 @@ export async function POST(req: Request): Promise<Response> {
         'x-ai-provider': provider,
         'x-model-used': validatedModel,
         'x-is-fallback': isFallback.toString(),
-        'x-files-processed': processedFiles.length.toString()
+        'x-files-processed': processedFiles.length.toString(),
+        'x-request-mode': mode
       },
     });
 
@@ -461,7 +493,7 @@ export async function POST(req: Request): Promise<Response> {
     // AbortError (timeout) kontrolü
     if (err.name === 'AbortError') {
       return createErrorResponse(
-        'AI sistemi zaman aşımına uğradı (2dk)', 
+        'AI sistemi zaman aşımına uğradı', 
         'TIMEOUT', 
         504
       );
@@ -494,6 +526,90 @@ export async function POST(req: Request): Promise<Response> {
         errorName: err?.name,
         errorCode: err?.code 
       }
+    );
+  }
+}
+
+// Video job status kontrolü için GET handler
+export async function GET(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const pathname = url.pathname;
+  
+  // /api/ai-gateway/status/{jobId} pattern kontrolü
+  const statusMatch = pathname.match(/\/api\/ai-gateway\/status\/(.+)$/);
+  
+  if (!statusMatch) {
+    return createErrorResponse('Invalid status endpoint', 'INVALID_ENDPOINT', 404);
+  }
+  
+  const jobId = statusMatch[1];
+  console.log(`🔍 Status check for job: ${jobId}`);
+  
+  try {
+    // n8n status webhook'una forward et
+    const statusWebhookUrl = process.env.N8N_STATUS_WEBHOOK_URL || 'http://localhost:5678/webhook/ai-status';
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30sn timeout
+    
+    let n8nResponse: Response;
+    try {
+      n8nResponse = await fetch(`${statusWebhookUrl}/${jobId}`, {
+        method: 'GET',
+        headers: {
+          'user-agent': 'multi-ai-gateway-status/2.3',
+          'x-job-id': jobId
+        },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    
+    const responseText = await n8nResponse.text();
+    
+    if (!n8nResponse.ok) {
+      return createErrorResponse(
+        `Status check failed: ${responseText}`,
+        'STATUS_CHECK_FAILED',
+        n8nResponse.status
+      );
+    }
+    
+    // JSON parse et ve döndür
+    try {
+      const statusData = JSON.parse(responseText);
+      return new Response(JSON.stringify(statusData), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'x-job-id': jobId
+        }
+      });
+    } catch (parseErr) {
+      return createErrorResponse(
+        'Invalid status response from n8n',
+        'INVALID_STATUS_RESPONSE',
+        502
+      );
+    }
+    
+  } catch (err: any) {
+    console.error(`❌ Status check error for job ${jobId}:`, err);
+    
+    if (err.name === 'AbortError') {
+      return createErrorResponse(
+        'Status check timeout',
+        'STATUS_TIMEOUT',
+        504
+      );
+    }
+    
+    return createErrorResponse(
+      err?.message || 'Status check failed',
+      'STATUS_ERROR',
+      500,
+      { jobId }
     );
   }
 }

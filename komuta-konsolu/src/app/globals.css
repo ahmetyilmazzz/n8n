@@ -1196,3 +1196,41 @@ body {
     gap: 4px;
   }
 }
+
+.media-message {
+  margin: 12px 0;
+}
+
+.ai-generated-media {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.media-caption {
+  font-size: 0.9em;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.video-processing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.loading-spinner {
+  font-size: 24px;
+  animation: pulse 2s infinite;
+}
+
+.video-failed {
+  padding: 16px;
+  background: var(--error-bg);
+  border-radius: 8px;
+  color: var(--error-text);
+}
