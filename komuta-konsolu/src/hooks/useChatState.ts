@@ -1,30 +1,72 @@
+// src/hooks/useChatState.ts
+// Sadece sohbetin temel durumlarını yönetir: mesajlar, yüklenme durumu ve hatalar.
+'use client';
+
 import { useState } from 'react';
-import { AIProvider, AIModel } from '@/types';
-import { AI_MODELS } from '@/constants/models';
+import { detectProvider } from '@/lib/ai-helpers';
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  model?: string;
+  provider?: string;
+}
 
 export const useChatState = () => {
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('claude');
-  const [selectedModel, setSelectedModel] = useState('claude-3-5-sonnet-20241022');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const availableModels = AI_MODELS.filter(model => model.provider === selectedProvider);
+  const addUserMessage = (content: string, model: string) => {
+    const userMessage: ChatMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'user',
+      content,
+      timestamp: new Date(),
+      model,
+    };
+    setMessages(prev => [...prev, userMessage]);
+  };
+
+  const addAssistantMessage = (content: string, model: string, provider?: string) => {
+    const assistantMessage: ChatMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'assistant',
+      content,
+      timestamp: new Date(),
+      model,
+      provider: provider || detectProvider(model),
+    };
+    setMessages(prev => [...prev, assistantMessage]);
+  };
   
-  const activeModel = AI_MODELS.find(m => m.id === selectedModel);
+  const addErrorMessage = (errorMessage: string, model: string) => {
+    const errorChatMessage: ChatMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'assistant',
+      content: `❌ **Hata:** ${errorMessage}`,
+      timestamp: new Date(),
+      model,
+    };
+    setMessages(prev => [...prev, errorChatMessage]);
+  };
 
-  const handleProviderChange = (provider: AIProvider) => {
-    setSelectedProvider(provider);
-    const firstModel = AI_MODELS.find(m => m.provider === provider);
-    if (firstModel) {
-      setSelectedModel(firstModel.id);
-    }
+  const resetMessages = () => {
+    setMessages([]);
+    setError(null);
   };
 
   return {
-    selectedProvider,
-    selectedModel,
-    availableModels,
-    activeModel,
-    setSelectedProvider,
-    setSelectedModel,
-    handleProviderChange
+    messages,
+    isLoading,
+    error,
+    setIsLoading,
+    setError,
+    addUserMessage,
+    addAssistantMessage,
+    addErrorMessage,
+    resetMessages,
   };
 };
