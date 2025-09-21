@@ -4,6 +4,7 @@
 import { useState, useRef, FormEvent, ChangeEvent } from 'react';
 import { useChat } from '@/hooks/use-chat-hook';
 import { useTheme } from '@/hooks/useTheme';
+import { Header } from '@/components/Header';
 
 // Tipler, Sabitler ve Yardımcı Fonksiyonlar
 import { AIProvider, UploadedFile, GeneratedFile } from '@/lib/types';
@@ -38,10 +39,7 @@ export default function ChatPage() {
   const { theme, toggleTheme } = useTheme();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, isLoading, error, sendMessage, resetChat } = useChat({
-    model: selectedModel,
-    onError: (err) => console.error("Bir Hata Oluştu:", err.message),
-  });
+  const { messages, isLoading, error, sendMessage, resetChat } = useChat({model: selectedModel, onError: (err) => console.error("Bir Hata Oluştu:", err.message),});
 
   // --- HANDLER FONKSİYONLARI ---
 
@@ -128,71 +126,89 @@ export default function ChatPage() {
   // --- RENDER ---
 
   return (
-    <div className="chat-app">
-      <div className="chat-main">
-        <div style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 200, display: 'flex', gap: '8px' }}>
-          <button onClick={toggleTheme} className="theme-toggle">{theme === 'light' ? '🌙' : '☀️'}</button>
-          <button onClick={() => setShowSettings(!showSettings)} className="settings-toggle" title="AI Ayarları">⚙️</button>
-        </div>
-
-        <div className="messages-container">
-          {messages.length === 0 && !isLoading && <EmptyState onSuggestionClick={handleSuggestionClick} />}
-          {messages.map((msg) => (
-            <MessageBubble 
-              key={msg.id} 
-              message={msg} 
-              provider={selectedProvider}
-              onCodeDetected={msg.role === 'assistant' ? handleCodeDetected : undefined}
-            />
-          ))}
-          {generatedFiles.length > 0 && <GeneratedFilesList files={generatedFiles} onViewFile={handleViewFile} />}
-          {isLoading && <LoadingIndicator provider={selectedProvider} activeModel={activeModel} />}
-          {error && <ErrorDisplay error={error.message} />}
-        </div>
-
-        <div className="input-container">
-          <div className="input-wrapper">
-            <form onSubmit={handleSubmit} className="input-form">
-              <UploadedFilesList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
-              <div className="input-main">
-                <button type="button" onClick={() => setShowAttachment(true)} className="attachment-btn" title="Dosya veya resim ekle">📎</button>
-                <TextArea
-                  ref={textareaRef}
-                  value={inputValue}
-                  onChange={handleInputChange}
-                  placeholder={`${activeModel?.name || 'AI'} ile sohbet edin...`}
-                  disabled={isLoading}
-                  rows={1}
-                  style={{ resize: 'none' }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (!isLoading && inputValue.trim()) handleSubmit(e as any);
-                    }
-                  }}
-                />
-                <Button type="submit" disabled={isLoading || !inputValue.trim()}>{isLoading ? '⏳' : '📤'}</Button>
-              </div>
-            </form>
-          </div>
-        </div>
+  <div className="chat-app">
+    <Header
+      selectedProvider={selectedProvider}
+      selectedModel={selectedModel}
+      onProviderChange={handleProviderChange}
+      onModelChange={setSelectedModel}
+      onNewChat={handleResetChat}
+    />
+    
+    <div className={`chat-main ${messages.length === 0 ? 'empty-chat' : 'has-messages'}`}>
+      <div style={{ position: 'fixed', top: '80px', right: '20px', zIndex: 200, display: 'flex', gap: '8px' }}>
+        <button onClick={toggleTheme} className="theme-toggle">{theme === 'light' ? '🌙' : '☀️'}</button>
+        <button onClick={() => setShowSettings(!showSettings)} className="settings-toggle" title="AI Ayarları">⚙️</button>
       </div>
 
-      <AttachmentSelector isOpen={showAttachment} onClose={() => setShowAttachment(false)} onFileUpload={handleFileUpload} onImagePaste={handleImagePaste} />
-      <FileViewerPanel isOpen={showFileViewer} onClose={() => setShowFileViewer(false)} file={currentViewFile} />
-      <SettingsPanel
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        onProviderChange={handleProviderChange}
-        onModelChange={setSelectedModel}
-        onResetChat={handleResetChat}
-        onToggleTheme={toggleTheme}
-        theme={theme}
-        generatedFileCount={generatedFiles.length}
-        activeModel={activeModel}
-      />
+      <div className="messages-container">
+        {messages.map((msg) => (
+          <MessageBubble 
+            key={msg.id} 
+            message={msg} 
+            provider={selectedProvider}
+            onCodeDetected={msg.role === 'assistant' ? handleCodeDetected : undefined}
+          />
+        ))}
+        {generatedFiles.length > 0 && <GeneratedFilesList files={generatedFiles} onViewFile={handleViewFile} />}
+        {isLoading && <LoadingIndicator provider={selectedProvider} activeModel={activeModel} />}
+        {error && <ErrorDisplay error={error.message} />}
+      </div>
+
+      <div className="modern-input-container">
+        <div className="modern-input-wrapper">
+          <UploadedFilesList files={uploadedFiles} onRemoveFile={handleRemoveFile} />
+          <form onSubmit={handleSubmit} className="modern-input-form">
+            <div className="input-with-actions">
+              <button type="button" onClick={() => setShowAttachment(true)} className="modern-attachment-btn" title="Dosya ekle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C13.1 2 14 2.9 14 4V16C14 17.1 13.1 18 12 18S10 17.1 10 16V4C10 2.9 10.9 2 12 2M12 0C8.69 0 6 2.69 6 6V16C6 19.31 8.69 22 12 22S18 19.31 18 16V6C18 2.69 15.31 0 12 0Z"/>
+                </svg>
+              </button>
+              <TextArea
+                ref={textareaRef}
+                value={inputValue}
+                onChange={handleInputChange}
+                placeholder={`${activeModel?.name || 'AI'} ile sohbet edin...`}
+                disabled={isLoading}
+                className="modern-textarea"
+                rows={1}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!isLoading && inputValue.trim()) handleSubmit(e as any);
+                  }
+                }}
+              />
+              <button type="submit" disabled={isLoading || !inputValue.trim()} className="modern-send-btn">
+                {isLoading ? (
+                  <div className="loading-spinner" />
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+                  </svg>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
-  );
-}
+
+    <AttachmentSelector isOpen={showAttachment} onClose={() => setShowAttachment(false)} onFileUpload={handleFileUpload} onImagePaste={handleImagePaste} />
+    <FileViewerPanel isOpen={showFileViewer} onClose={() => setShowFileViewer(false)} file={currentViewFile} />
+    <SettingsPanel
+      isOpen={showSettings}
+      onClose={() => setShowSettings(false)}
+      selectedProvider={selectedProvider}
+      selectedModel={selectedModel}
+      onProviderChange={handleProviderChange}
+      onModelChange={setSelectedModel}
+      onResetChat={handleResetChat}
+      onToggleTheme={toggleTheme}
+      theme={theme}
+      generatedFileCount={generatedFiles.length}
+      activeModel={activeModel}
+    />
+  </div>
+);
