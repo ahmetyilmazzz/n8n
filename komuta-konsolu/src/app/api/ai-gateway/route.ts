@@ -3,6 +3,19 @@
 
 export const dynamic = 'force-dynamic';
 
+interface ProcessedFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data?: string;
+  content?: string;
+  contentType?: string;
+  category?: string;
+  lastModified?: number;
+  uploadedAt?: Date;
+}
+
 // Model validasyon listeleri - Tip güvenli
 const VALID_MODELS: Record<string, string[]> = {
   claude: [
@@ -181,18 +194,30 @@ export async function POST(req: Request): Promise<Response> {
       console.log(`🔄 Fallback kullanıldı: ${body.model} -> ${validatedModel}`);
     }
 
-    // Enhanced body hazırla
-    const enhancedBody = {
-      ...body,
-      model: validatedModel,
-      provider: provider,
-      original_model: body.model || null,
-      is_fallback: isFallback,
-      timestamp: new Date().toISOString(),
-      // Dosya desteği için ek kontroller
-      files: Array.isArray(body.files) ? body.files : [],
-      conversation_history: Array.isArray(body.conversation_history) ? body.conversation_history : []
-    };
+   const enhancedBody = {
+    ...body,
+    model: validatedModel,
+    provider: provider,
+    original_model: body.model || null,
+    is_fallback: isFallback,
+    timestamp: new Date().toISOString(),
+    // Dosya desteği için güncellenmiş kontroller
+    files: Array.isArray(body.files) ? body.files.map((file: any) => ({
+      name: file.name || 'unnamed',
+      type: file.type || file.mimeType || 'application/octet-stream',
+      size: file.size || 0,
+      content: file.data || file.content || '',
+      contentType: file.contentType || file.category || 'unknown'
+    })) : [],
+    conversation_history: Array.isArray(body.conversation_history) ? body.conversation_history : []
+  };
+  
+    if (enhancedBody.files && enhancedBody.files.length > 0) {
+    console.log(`📎 Gateway: ${enhancedBody.files.length} dosya eklendi:`, 
+      enhancedBody.files.map((f: any) => ({ name: f.name, type: f.type, size: f.size }))
+    );
+  }
+
 
     console.log('📡 Gateway: n8n webhook\'una istek gönderiliyor...');
 

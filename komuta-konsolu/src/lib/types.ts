@@ -1,30 +1,34 @@
-// src/lib/types.ts
-// Proje genelinde kullanılacak TypeScript arayüzlerini ve tiplerini tanımlar.
+// src/lib/types.ts - Güncellenmiş versiyon
 
-export type AIProvider = 'claude' | 'chatgpt' | 'gemini';
-
-export interface AIModel {
-  id: string;
-  name: string;
-  provider: AIProvider;
-  tier?: 'flagship' | 'balanced' | 'fast' | 'legacy';
-}
-
-export interface UploadedFile {
+export interface ProcessedFile {
   id: string;
   name: string;
   type: string;
   size: number;
-  data: string; // base64 data URL
+  data: string; // Base64 encoded data
+  category?: 'image' | 'video' | 'audio' | 'document' | 'code' | 'other';
+  lastModified?: number;
+  webkitRelativePath?: string;
 }
 
-export type GeneratedFileType = 'javascript' | 'typescript' | 'python' | 'css' | 'html' | 'json' | 'txt' | 'markdown' | 'xml' | 'sql' | 'yaml';
+export interface UploadedFile extends ProcessedFile {
+  uploadedAt?: Date;
+}
 
 export interface GeneratedFile {
   id: string;
   name: string;
   content: string;
-  type: GeneratedFileType;
+  type: 'javascript' | 'typescript' | 'python' | 'css' | 'html' | 'json' | 'txt' | 'markdown' | 'xml' | 'sql' | 'yaml' | 'other';
   size: number;
   createdAt: Date;
+  downloadUrl?: string;
+}
+
+// AI Response'dan gelen dosya formatı
+export interface AIGeneratedFile {
+  filename: string;
+  content: string;
+  language: string;
+  type: string;
 }
